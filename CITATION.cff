@@ -7,7 +7,7 @@ type: software
 authors:
   - family-names: Adhali
     given-names: Omkar
-    orcid: ""
+    orcid: "https://orcid.org/0009-0002-9955-5163"
 repository-code: https://github.com/omkaradhali/pubmed_rag
 license: MIT
 date-released: "2026-04-13"
