@@ -23,3 +23,23 @@ pubmed_rag/
 ├── notebooks/     # exploration and experiments
 └── docs/          # design notes and references
 ```
+
+## Citation
+
+If you use this software in your research, please cite it:
+
+```bibtex
+@software{adhali2026pubmedrag,
+  author = {Adhali, Omkar},
+  title  = {pubmed\_rag},
+  url    = {https://github.com/omkaradhali/pubmed_rag},
+  year   = {2026},
+  license = {MIT}
+}
+```
+
+Or use the **"Cite this repository"** button on the GitHub repo page.
+
+## License
+
+MIT © [Omkar Adhali](https://github.com/omkaradhali)

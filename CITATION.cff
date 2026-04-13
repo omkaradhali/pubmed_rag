@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+title: pubmed_rag
+message: >-
+  If you use this software in your research, please cite it
+  using the metadata in this file.
+type: software
+authors:
+  - family-names: Adhali
+    given-names: Omkar
+    orcid: ""
+repository-code: https://github.com/omkaradhali/pubmed_rag
+license: MIT
+date-released: "2026-04-13"
+abstract: >-
+  A Retrieval-Augmented Generation (RAG) pipeline over PubMed
+  biomedical literature. Fetches and indexes PubMed abstracts,
+  embeds them into a vector store, and answers natural language
+  queries grounded in retrieved papers.
+keywords:
+  - retrieval-augmented-generation
+  - pubmed
+  - biomedical-nlp
+  - large-language-models
+  - vector-search
