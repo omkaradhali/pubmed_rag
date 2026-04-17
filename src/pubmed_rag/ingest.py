@@ -1,12 +1,18 @@
 """
 ingest.py — Fetch PubMed abstracts via NCBI E-utilities.
 
+NCBI's esearch will return up to 10,000 PMIDs in a single call.
+
 Public API:
     search_pubmed(query, max_results) -> list[str]             # returns PMIDs
     fetch_abstracts(pmids)            -> list[dict[str, str]]  # returns parsed records
     ingest(query, max_results)        -> list[dict[str, str]]  # search + fetch combined
+    save_to_jsonl(records, path)      -> int                   # appends records to .jsonl file
 """
 
+import json
+import logging
+import math
 import os
 import time
 import xml.etree.ElementTree as ET
@@ -16,6 +22,8 @@ from dotenv import load_dotenv
 from requests.models import HTTPError
 
 load_dotenv()
+
+_logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -197,9 +205,13 @@ def fetch_abstracts(pmids: list[str]) -> list[dict[str, str]]:
         return []
 
     all_records: list[dict[str, str]] = []
+    # math.ceil gives the number of batches, including any partial final batch
+    total_batches = math.ceil(len(pmids) / EFETCH_BATCH_SIZE)
 
     for i in range(0, len(pmids), EFETCH_BATCH_SIZE):
         batch = pmids[i : i + EFETCH_BATCH_SIZE]
+        batch_num = i // EFETCH_BATCH_SIZE + 1
+        _logger.info("Fetching batch %d/%d (%d PMIDs)...", batch_num, total_batches, len(batch))
 
         params = _api_params() | {
             "db": "pubmed",
@@ -247,3 +259,72 @@ def ingest(query: str, max_results: int = 10) -> list[dict[str, str]]:
         return []
 
     return fetch_abstracts(pmids)
+
+
+# ── Persistence ────────────────────────────────────────────────────────────────
+
+
+def save_to_jsonl(records: list[dict[str, str]], path: str | os.PathLike) -> int:
+    """
+    Append records to a JSONL file — one JSON object per line.
+
+    Opens in append mode so it is safe to call after a partial write or to
+    accumulate records across multiple runs. Creates the file if it doesn't exist.
+
+    ensure_ascii=False preserves non-ASCII characters (accented author names,
+    special symbols) rather than escaping them to \\uXXXX sequences.
+
+    Args:
+        records: List of dicts to serialize (e.g. from fetch_abstracts).
+        path:    Destination file path — created if absent.
+
+    Returns:
+        Number of records written in this call.
+    """
+    written = 0
+    with open(path, "a", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            written += 1
+    return written
+
+
+# ── CLI entrypoint ─────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    parser = argparse.ArgumentParser(description="Fetch PubMed abstracts and save to a JSONL file.")
+    parser.add_argument(
+        "--query",
+        required=True,
+        help='Entrez search string, e.g. "oncology[Title/Abstract]"',
+    )
+    parser.add_argument(
+        "--max-results",
+        type=int,
+        default=500,
+        help="Number of abstracts to fetch (default: 500)",
+    )
+    parser.add_argument(
+        "--output",
+        default="data/abstracts.jsonl",
+        help="Output JSONL file path (default: data/abstracts.jsonl)",
+    )
+    args = parser.parse_args()
+
+    _logger.info("Searching PubMed for: %r", args.query)
+    pmids = search_pubmed(args.query, max_results=args.max_results)
+    _logger.info("Found %d PMIDs", len(pmids))
+
+    if not pmids:
+        _logger.info("No results — exiting.")
+        raise SystemExit(0)
+
+    records = fetch_abstracts(pmids)
+    _logger.info("Fetched %d records", len(records))
+
+    saved = save_to_jsonl(records, args.output)
+    _logger.info("Saved %d records → %s", saved, args.output)
