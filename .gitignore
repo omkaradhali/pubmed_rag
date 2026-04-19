@@ -45,6 +45,7 @@ wandb/
 data/raw/
 data/processed/
 data/chroma_db/
+data/*.jsonl
 
 # detect-secrets — baseline IS committed (tracks approved patterns)
 

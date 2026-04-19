@@ -174,6 +174,11 @@ if __name__ == "__main__":
         default=DEFAULT_CHUNK_OVERLAP,
         help=f"Overlap between adjacent chunks (default: {DEFAULT_CHUNK_OVERLAP})",
     )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Save chunks to this JSONL file (default: print summary only)",
+    )
     args = parser.parse_args()
 
     chunks = load_and_chunk(
@@ -191,3 +196,9 @@ if __name__ == "__main__":
             first["chunk_total"],
             first["text"][:200],
         )
+
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            for chunk in chunks:
+                f.write(json.dumps(chunk) + "\n")
+        _logger.info("Saved %d chunks to %s", len(chunks), args.output)

@@ -6,6 +6,12 @@ repos:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
 
+  # Strip notebook outputs before committing
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      - id: nbstripout
+
   # Ruff: lint + format in one pass
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.10
