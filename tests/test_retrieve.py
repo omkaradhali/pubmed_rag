@@ -59,7 +59,7 @@ def mock_deps():
         yield mock_collection
 
 
-# ── Tests ──────────────────────────────────────────────────────────────────────
+# Tests
 
 
 class TestRetrieve:

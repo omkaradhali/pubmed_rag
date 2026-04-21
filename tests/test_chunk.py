@@ -28,7 +28,7 @@ def _record(
     return {"pmid": pmid, "title": title, "abstract": abstract, "year": year}
 
 
-# ── chunk_record ───────────────────────────────────────────────────────────────
+# chunk_record
 
 
 class TestChunkRecord:
@@ -80,7 +80,7 @@ class TestChunkRecord:
         assert len(chunks) > 1
 
 
-# ── chunk_records ──────────────────────────────────────────────────────────────
+# chunk_records
 
 
 class TestChunkRecords:
