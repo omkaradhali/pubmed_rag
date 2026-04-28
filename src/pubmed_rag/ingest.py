@@ -8,6 +8,25 @@ Public API:
     fetch_abstracts(pmids)            -> list[dict[str, str]]  # returns parsed records
     ingest(query, max_results)        -> list[dict[str, str]]  # search + fetch combined
     save_to_jsonl(records, path)      -> int                   # appends records to .jsonl file
+
+Each parsed record contains:
+    pmid              (str)       — PubMed unique ID
+    title             (str)       — article title
+    abstract          (str)       — full abstract text
+    year              (str)       — 4-digit publication year, or "" if not found
+    doi               (str)       — raw DOI string, e.g. "10.1038/s41591-024-01234-5", or ""
+    doi_url           (str)       — clickable DOI link, e.g. "https://doi.org/10.1038/...", or ""
+    pmc_id            (str)       — PubMed Central ID, e.g. "PMC11234567", or ""
+    pmc_url           (str)       — clickable PMC link, or "" if no free full text
+    authors           (list[str]) — author names as "LastName Initials",
+                                    e.g. ["Smith JA", "Jones B"]
+    journal           (str)       — full journal title, e.g. "Nature Medicine", or ""
+    publication_types (list[str]) — e.g. ["Journal Article", "Randomized Controlled Trial"]
+    mesh_terms        (list[str]) — NLM-assigned MeSH descriptor names, e.g. ["Breast Neoplasms"]
+                                    Empty list for recently published articles not yet indexed.
+
+doi_url and pmc_url are derived from doi/pmc_id at ingest time so downstream modules
+(chunk, retrieve, generate, API) never need to reconstruct them.
 """
 
 import json
@@ -125,21 +144,34 @@ def search_pubmed(query: str, max_results: int = 10) -> list[str]:
 # ── Step 2: fetch ──────────────────────────────────────────────────────────────
 
 
-def _parse_pubmed_xml(xml_text: str) -> list[dict[str, str]]:
+def _parse_pubmed_xml(xml_text: str) -> list[dict]:
     """
     Parse a PubmedArticleSet XML blob into a list of record dicts.
 
     Each dict has:
-        pmid     (str) — PubMed unique ID
-        title    (str) — article title
-        abstract (str) — full abstract (may be "" for articles without one)
-        year     (str) — 4-digit publication year, or "" if not found
+        pmid              (str)       — PubMed unique ID
+        title             (str)       — article title
+        abstract          (str)       — full abstract (may be "" for articles without one)
+        year              (str)       — 4-digit publication year, or "" if not found
+        doi               (str)       — raw DOI string, or ""
+        doi_url           (str)       — https://doi.org/{doi}, or ""
+        pmc_id            (str)       — PubMed Central ID, e.g. "PMC11234567", or ""
+        pmc_url           (str)       — https://...ncbi.nlm.nih.gov/pmc/articles/{pmc_id}/, or ""
+        authors           (list[str]) — ["LastName Initials", ...], or [] if no author list
+        journal           (str)       — full journal title, or ""
+        publication_types (list[str]) — ["Journal Article", "Randomized Controlled Trial", ...]
+        mesh_terms        (list[str]) — NLM MeSH descriptor names, or [] if not yet indexed
 
-    XPath selectors in the MEDLINE XML schema:
-        PMID:            .//PMID
-        Title:           .//ArticleTitle
-        Abstract parts:  .//AbstractText   (multiple for structured abstracts)
-        Pub year:        .//PubDate/Year   (fallback: .//PubDate/MedlineDate)
+    XPath selectors used:
+        PMID:              .//PMID
+        Title:             .//ArticleTitle
+        Abstract:          .//AbstractText   (multiple for structured abstracts)
+        Pub year:          .//PubDate/Year   (fallback: .//PubDate/MedlineDate)
+        Article IDs:       .//ArticleIdList/ArticleId  (IdType="doi" and "pmc")
+        Authors:           .//AuthorList/Author
+        Journal:           .//Journal/Title
+        Pub types:         .//PublicationTypeList/PublicationType
+        MeSH:              .//MeshHeadingList/MeshHeading/DescriptorName
     """
     root = ET.fromstring(xml_text)
 
@@ -178,13 +210,107 @@ def _parse_pubmed_xml(xml_text: str) -> list[dict[str, str]]:
             medline_el = article.find(".//PubDate/MedlineDate")
             year = medline_el.text[:4] if medline_el is not None else ""
 
+        # ── Link-out identifiers ───────────────────────────────────────────────
+        # <ArticleIdList> holds identifiers assigned by different systems.
+        # We extract two that are useful for direct linking:
+        #
+        #   IdType="doi"  — Digital Object Identifier, present on ~90% of modern
+        #                   articles. doi.org is the canonical resolver.
+        #   IdType="pmc"  — PubMed Central ID, present only when free full text
+        #                   is available in PMC (~40–50% of PubMed records).
+        #                   This is the "LinkOut — More Resources" link on PubMed.
+        #
+        # Sample XML structure:
+        #   <ArticleIdList>
+        #     <ArticleId IdType="pubmed">41980200</ArticleId>
+        #     <ArticleId IdType="doi">10.1038/s41591-024-01234-5</ArticleId>
+        #     <ArticleId IdType="pmc">PMC11234567</ArticleId>  ← absent if no free text
+        #   </ArticleIdList>
+        doi = ""
+        pmc_id = ""
+        for id_el in article.findall(".//ArticleIdList/ArticleId"):
+            id_type = id_el.get("IdType", "")
+            if id_type == "doi" and id_el.text:
+                doi = id_el.text.strip()
+            elif id_type == "pmc" and id_el.text:
+                pmc_id = id_el.text.strip()
+
+        # Derive full URLs here at ingest time so no downstream module ever needs
+        # to reconstruct them. Empty string signals "not available" to the UI —
+        # the frontend should hide the chip when the value is "".
+        doi_url = f"https://doi.org/{doi}" if doi else ""
+        pmc_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmc_id}/" if pmc_id else ""
+
+        # ── Authors ───────────────────────────────────────────────────────────
+        # <AuthorList> contains <Author> elements — either individual people with
+        # <LastName>/<Initials>, or collective bodies with <CollectiveName>
+        # (e.g. consortium groups like "TCGA Research Network").
+        # We store "LastName Initials" for people and the collective name as-is.
+        # Downstream citation rendering can apply "et al." logic from this list.
+        authors: list[str] = []
+        for author_el in article.findall(".//AuthorList/Author"):
+            last_el = author_el.find("LastName")
+            initials_el = author_el.find("Initials")
+            collective_el = author_el.find("CollectiveName")
+            if last_el is not None and last_el.text:
+                initials = initials_el.text.strip() if initials_el is not None else ""
+                name = f"{last_el.text.strip()} {initials}".strip()
+                authors.append(name)
+            elif collective_el is not None and collective_el.text:
+                authors.append(collective_el.text.strip())
+
+        # ── Journal ───────────────────────────────────────────────────────────
+        # Full journal title (e.g. "Nature Medicine") from <Journal><Title>.
+        # Prefer full title over <ISOAbbreviation> for readability in citations.
+        journal_el = article.find(".//Journal/Title")
+        journal = journal_el.text.strip() if journal_el is not None else ""
+
+        # ── Publication types ─────────────────────────────────────────────────
+        # NLM assigns one or more publication type tags per article.
+        # "Journal Article" is nearly always present; clinically useful values
+        # include "Randomized Controlled Trial", "Review", "Meta-Analysis",
+        # "Clinical Trial", "Case Reports", "Systematic Review".
+        # Stored as a list so the UI and retrieval layer can filter by type.
+        publication_types: list[str] = [
+            el.text.strip()
+            for el in article.findall(".//PublicationTypeList/PublicationType")
+            if el.text
+        ]
+
+        # ── MeSH terms ────────────────────────────────────────────────────────
+        # Medical Subject Headings assigned by NLM curators after indexing.
+        # Only <DescriptorName> is captured (not sub-qualifiers like "diagnosis"
+        # or "drug therapy") to keep the list concise and query-friendly.
+        # Important: recently published articles may have an empty list here —
+        # NLM indexing typically lags publication by days to weeks.
+        mesh_terms: list[str] = [
+            el.text.strip()
+            for el in article.findall(".//MeshHeadingList/MeshHeading/DescriptorName")
+            if el.text
+        ]
+
         if pmid:  # skip malformed records with no PMID
-            records.append({"pmid": pmid, "title": title, "abstract": abstract, "year": year})
+            records.append(
+                {
+                    "pmid": pmid,
+                    "title": title,
+                    "abstract": abstract,
+                    "year": year,
+                    "doi": doi,
+                    "doi_url": doi_url,
+                    "pmc_id": pmc_id,
+                    "pmc_url": pmc_url,
+                    "authors": authors,
+                    "journal": journal,
+                    "publication_types": publication_types,
+                    "mesh_terms": mesh_terms,
+                }
+            )
 
     return records
 
 
-def fetch_abstracts(pmids: list[str]) -> list[dict[str, str]]:
+def fetch_abstracts(pmids: list[str]) -> list[dict]:
     """
     Fetch full abstract records for a list of PMIDs.
 
@@ -194,7 +320,8 @@ def fetch_abstracts(pmids: list[str]) -> list[dict[str, str]]:
         pmids: List of PubMed ID strings.
 
     Returns:
-        List of dicts: [{pmid, title, abstract, year}]
+        List of dicts: [{pmid, title, abstract, year, doi, doi_url, pmc_id, pmc_url,
+                         authors, journal, publication_types, mesh_terms}]
 
     efetch Request looks like:
         GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi
@@ -240,7 +367,7 @@ def fetch_abstracts(pmids: list[str]) -> list[dict[str, str]]:
 # ── Combined entry point ───────────────────────────────────────────────────────
 
 
-def ingest(query: str, max_results: int = 10) -> list[dict[str, str]]:
+def ingest(query: str, max_results: int = 10) -> list[dict]:
     """
     Search PubMed and return parsed abstract records.
 
@@ -251,7 +378,8 @@ def ingest(query: str, max_results: int = 10) -> list[dict[str, str]]:
         max_results: Number of abstracts to fetch.
 
     Returns:
-        List of dicts: {pmid, title, abstract, year}.
+        List of dicts: {pmid, title, abstract, year, doi, doi_url, pmc_id, pmc_url,
+                        authors, journal, publication_types, mesh_terms}.
     """
     pmids = search_pubmed(query, max_results=max_results)
 
@@ -264,7 +392,7 @@ def ingest(query: str, max_results: int = 10) -> list[dict[str, str]]:
 # ── Persistence ────────────────────────────────────────────────────────────────
 
 
-def save_to_jsonl(records: list[dict[str, str]], path: str | os.PathLike) -> int:
+def save_to_jsonl(records: list[dict], path: str | os.PathLike) -> int:
     """
     Append records to a JSONL file — one JSON object per line.
 

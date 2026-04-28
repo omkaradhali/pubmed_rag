@@ -24,8 +24,29 @@ def _record(
     pmid: str = "12345",
     title: str = "Test Paper Title",
     year: str = "2023",
+    doi: str = "10.1234/test.2023",
+    pmc_id: str = "PMC9999999",
+    authors: list | None = None,
+    journal: str = "Journal of Testing",
+    publication_types: list | None = None,
+    mesh_terms: list | None = None,
 ) -> dict:
-    return {"pmid": pmid, "title": title, "abstract": abstract, "year": year}
+    return {
+        "pmid": pmid,
+        "title": title,
+        "abstract": abstract,
+        "year": year,
+        "doi": doi,
+        "doi_url": f"https://doi.org/{doi}" if doi else "",
+        "pmc_id": pmc_id,
+        "pmc_url": f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmc_id}/" if pmc_id else "",
+        "authors": authors if authors is not None else ["Smith JA", "Jones B"],
+        "journal": journal,
+        "publication_types": publication_types
+        if publication_types is not None
+        else ["Journal Article"],
+        "mesh_terms": mesh_terms if mesh_terms is not None else ["Neoplasms", "Humans"],
+    }
 
 
 # chunk_record
@@ -38,7 +59,22 @@ class TestChunkRecord:
     def test_required_keys_present(self):
         chunks = chunk_record(_record(), _SPLITTER)
         assert len(chunks) >= 1
-        expected = {"pmid", "title", "year", "text", "chunk_index", "chunk_total"}
+        expected = {
+            "pmid",
+            "title",
+            "year",
+            "doi",
+            "doi_url",
+            "pmc_id",
+            "pmc_url",  # link-out fields (D-031)
+            "authors",
+            "journal",
+            "publication_types",
+            "mesh_terms",  # bibliographic (D-032)
+            "text",
+            "chunk_index",
+            "chunk_total",
+        }
         for chunk in chunks:
             assert set(chunk.keys()) == expected
 
@@ -101,6 +137,21 @@ class TestChunkRecords:
 
     def test_all_chunk_keys_present_in_output(self):
         chunks = chunk_records([_record()])
-        expected = {"pmid", "title", "year", "text", "chunk_index", "chunk_total"}
+        expected = {
+            "pmid",
+            "title",
+            "year",
+            "doi",
+            "doi_url",
+            "pmc_id",
+            "pmc_url",  # link-out fields (D-031)
+            "authors",
+            "journal",
+            "publication_types",
+            "mesh_terms",  # bibliographic (D-032)
+            "text",
+            "chunk_index",
+            "chunk_total",
+        }
         for chunk in chunks:
             assert set(chunk.keys()) == expected

@@ -39,25 +39,49 @@ def chunk_record(record: dict[str, str], splitter: RecursiveCharacterTextSplitte
     lose all topic signal.
 
     Each returned chunk dict has:
-        pmid        (str) — inherited from parent record
-        title       (str) — inherited from parent record
-        year        (str) — inherited from parent record
-        text        (str) — the chunk text (title-prefixed abstract fragment)
-        chunk_index (int) — position of this chunk within the record (0-based)
-        chunk_total (int) — total number of chunks for this record
+        pmid              (str)       — inherited from parent record
+        title             (str)       — inherited from parent record
+        year              (str)       — inherited from parent record
+        doi               (str)       — inherited from parent record (raw DOI or "")
+        doi_url           (str)       — inherited from parent record (clickable DOI link or "")
+        pmc_id            (str)       — inherited from parent record (PMC ID or "")
+        pmc_url           (str)       — inherited from parent record (clickable PMC link or "")
+        authors           (list[str]) — inherited from parent record
+        journal           (str)       — inherited from parent record
+        publication_types (list[str]) — inherited from parent record
+        mesh_terms        (list[str]) — inherited from parent record
+        text              (str)       — the chunk text (title-prefixed abstract fragment)
+        chunk_index       (int)       — position of this chunk within the record (0-based)
+        chunk_total       (int)       — total number of chunks for this record
 
     Args:
-        record:   A single record dict from ingest.py: {pmid, title, abstract, year}
+        record:   A single record dict from ingest.py: {pmid, title, abstract, year,
+                  doi, doi_url, pmc_id, pmc_url, authors, journal,
+                  publication_types, mesh_terms}
         splitter: A configured RecursiveCharacterTextSplitter instance.
 
     Returns:
         List of chunk dicts. Returns [] if abstract is empty.
     """
 
-    # Metadata for all chunks
+    # Core bibliographic metadata — carried on every chunk so any retrieved
+    # fragment can be traced back to its source and rendered as a citation.
     pmid = record["pmid"]
     title = record["title"]
     year = record["year"]
+
+    # Link-out and bibliographic fields added in ingest.py — passed through here
+    # so the UI can render chips and citations from a retrieved chunk without
+    # extra lookups. .get() with empty defaults keeps this backward-compatible
+    # with abstracts.jsonl files ingested before these fields were introduced.
+    doi = record.get("doi", "")
+    doi_url = record.get("doi_url", "")
+    pmc_id = record.get("pmc_id", "")
+    pmc_url = record.get("pmc_url", "")
+    authors: list[str] = record.get("authors", [])
+    journal = record.get("journal", "")
+    publication_types: list[str] = record.get("publication_types", [])
+    mesh_terms: list[str] = record.get("mesh_terms", [])
 
     abstract = record["abstract"]
 
@@ -72,6 +96,14 @@ def chunk_record(record: dict[str, str], splitter: RecursiveCharacterTextSplitte
             "pmid": pmid,
             "title": title,
             "year": year,
+            "doi": doi,
+            "doi_url": doi_url,
+            "pmc_id": pmc_id,
+            "pmc_url": pmc_url,
+            "authors": authors,
+            "journal": journal,
+            "publication_types": publication_types,
+            "mesh_terms": mesh_terms,
             "text": fragment,
             "chunk_index": i,
             "chunk_total": len(fragments),
