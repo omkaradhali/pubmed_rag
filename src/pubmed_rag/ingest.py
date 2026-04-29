@@ -88,13 +88,18 @@ def _api_params() -> dict[str, str]:
 # ── Step 1: search ─────────────────────────────────────────────────────────────
 
 
-def search_pubmed(query: str, max_results: int = 10) -> list[str]:
+def search_pubmed(
+    query: str,
+    max_results: int = 10,
+    reldate: int | None = None,
+) -> list[str]:
     """
     Search PubMed and return a list of PMIDs matching query.
 
     Args:
-        query: Entrez search string, e.g. "colorectal cancer[Title/Abstract]"
+        query:       Entrez search string, e.g. "colorectal cancer[Title/Abstract]"
         max_results: How many PMIDs to return (NCBI cap: 10,000).
+        reldate:     If set, restrict results to articles indexed in the last N days.
 
     Returns:
         List of PMID strings, most-relevant first.
@@ -122,6 +127,10 @@ def search_pubmed(query: str, max_results: int = 10) -> list[str]:
         "retmax": max_results,
         "retmode": "json",
     }
+
+    if reldate is not None:
+        params["reldate"] = reldate
+        params["datetype"] = "edat"
 
     try:
         response = requests.get(ESEARCH_URL, params=params, timeout=SEARCH_MPIDS_API_TIMEOUT)
@@ -367,7 +376,11 @@ def fetch_abstracts(pmids: list[str]) -> list[dict]:
 # ── Combined entry point ───────────────────────────────────────────────────────
 
 
-def ingest(query: str, max_results: int = 10) -> list[dict]:
+def ingest(
+    query: str,
+    max_results: int = 10,
+    reldate: int | None = None,
+) -> list[dict]:
     """
     Search PubMed and return parsed abstract records.
 
@@ -376,12 +389,13 @@ def ingest(query: str, max_results: int = 10) -> list[dict]:
     Args:
         query:       Entrez search string.
         max_results: Number of abstracts to fetch.
+        reldate:     If set, restrict to articles indexed in the last N days.
 
     Returns:
         List of dicts: {pmid, title, abstract, year, doi, doi_url, pmc_id, pmc_url,
                         authors, journal, publication_types, mesh_terms}.
     """
-    pmids = search_pubmed(query, max_results=max_results)
+    pmids = search_pubmed(query, max_results=max_results, reldate=reldate)
 
     if not pmids:
         return []

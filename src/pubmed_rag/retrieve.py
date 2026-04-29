@@ -3,15 +3,19 @@ retrieve.py — Semantic retrieval over the ChromaDB vector store.
 
 Embeds a query string with the same model used in embed.py, searches the
 ChromaDB collection using HNSW cosine similarity, and returns the top-k
-matching chunks with their source metadata and similarity scores.
+matching chunks with their full source metadata and similarity scores.
 
 ChromaDB returns distances (lower = more similar). This module converts them
 to similarity scores (higher = more similar) via: score = 1 - distance.
+
+List fields stored in ChromaDB as JSON strings (authors, publication_types,
+mesh_terms) are deserialized back to Python lists before returning.
 
 Public API:
     retrieve(query, n_results, min_score) -> list[dict]
 """
 
+import json
 import logging
 
 from pubmed_rag.embed import _MODEL_NAME, _model
@@ -22,8 +26,11 @@ _logger = logging.getLogger(__name__)
 _DEFAULT_N_RESULTS = 5
 _DEFAULT_MIN_SCORE = 0.0
 
+# Fields stored as JSON strings in ChromaDB metadata — deserialized on retrieval.
+_JSON_FIELDS = ("authors", "publication_types", "mesh_terms")
 
-# Core retrieval
+
+# ── Core retrieval ─────────────────────────────────────────────────────────────
 
 
 def retrieve(
@@ -45,13 +52,22 @@ def retrieve(
 
     Returns:
         List of result dicts, sorted by score descending. Each dict has:
-            text   (str)   — chunk text
-            pmid   (str)   — PubMed ID
-            title  (str)   — article title
-            year   (str)   — publication year
-            chunk_index (int) — position of chunk within the abstract
-            chunk_total (int) — total chunks from that abstract
-            score  (float) — cosine similarity score in [0, 1]
+            text              (str)       — chunk text (abstract excerpt)
+            pmid              (str)       — PubMed ID
+            title             (str)       — article title
+            year              (str)       — publication year
+            doi               (str)       — raw DOI string, or ""
+            doi_url           (str)       — https://doi.org/{doi}, or ""
+            pmc_id            (str)       — PubMed Central ID, or ""
+            pmc_url           (str)       — PMC full-text link, or ""
+            pubmed_url        (str)       — https://pubmed.ncbi.nlm.nih.gov/{pmid}/
+            journal           (str)       — full journal title, or ""
+            authors           (list[str]) — ["LastName Initials", ...], or []
+            publication_types (list[str]) — ["Journal Article", ...], or []
+            mesh_terms        (list[str]) — NLM MeSH descriptors, or []
+            chunk_index       (int)       — 0-based position within the abstract
+            chunk_total       (int)       — total chunks from this abstract
+            score             (float)     — cosine similarity in [0, 1]
     """
     _logger.info("Embedding query with %s...", _MODEL_NAME)
 
@@ -81,28 +97,43 @@ def retrieve(
         if score < min_score:
             continue
 
-        results.append(
-            {
-                "text": text,
-                "pmid": meta["pmid"],
-                "title": meta["title"],
-                "year": meta["year"],
-                "chunk_index": meta["chunk_index"],
-                "chunk_total": meta["chunk_total"],
-                "score": round(score, 4),
-            }
-        )
+        result = {
+            "text": text,
+            # Identifiers
+            "pmid": meta.get("pmid", ""),
+            "title": meta.get("title", ""),
+            "year": meta.get("year", ""),
+            # Links — derived here so callers never reconstruct them
+            "doi": meta.get("doi", ""),
+            "doi_url": meta.get("doi_url", ""),
+            "pmc_id": meta.get("pmc_id", ""),
+            "pmc_url": meta.get("pmc_url", ""),
+            "pubmed_url": f"https://pubmed.ncbi.nlm.nih.gov/{meta.get('pmid', '')}/",
+            # Bibliographic
+            "journal": meta.get("journal", ""),
+            # Chunk position
+            "chunk_index": meta.get("chunk_index", 0),
+            "chunk_total": meta.get("chunk_total", 1),
+            # Similarity
+            "score": round(score, 4),
+        }
+
+        # Deserialize list fields stored as JSON strings in ChromaDB
+        for field in _JSON_FIELDS:
+            raw_val = meta.get(field, "[]")
+            result[field] = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
+
+        results.append(result)
 
     _logger.info("Returned %d results (min_score=%.2f).", len(results), min_score)
 
     return results
 
 
-# CLI entrypoint
+# ── CLI entrypoint ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse
-    import json
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -133,6 +164,9 @@ if __name__ == "__main__":
     for i, r in enumerate(results, 1):
         print(f"[{i}] score={r['score']}  pmid={r['pmid']}  year={r['year']}")
         print(f"    {r['title']}")
+        print(f"    Authors: {r['authors']}")
+        print(f"    Journal: {r['journal']}")
+        print(f"    PubMed:  {r['pubmed_url']}")
         print(f"    {r['text'][:200]}...")
         print()
 

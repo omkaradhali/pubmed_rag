@@ -36,10 +36,19 @@ def _meta(
     chunk_index: int = 0,
     chunk_total: int = 1,
 ) -> dict:
+    """Minimal ChromaDB metadata dict matching the schema written by vectorstore.py."""
     return {
         "pmid": pmid,
         "title": title,
         "year": year,
+        "doi": "",
+        "doi_url": "",
+        "pmc_id": "",
+        "pmc_url": "",
+        "journal": "",
+        "authors": "[]",  # JSON-serialized list, as stored in ChromaDB
+        "publication_types": "[]",
+        "mesh_terms": "[]",
         "chunk_index": chunk_index,
         "chunk_total": chunk_total,
     }
@@ -110,7 +119,24 @@ class TestRetrieve:
             distances=[0.2],
         )
         results = retrieve("query")
-        expected_keys = {"text", "pmid", "title", "year", "chunk_index", "chunk_total", "score"}
+        expected_keys = {
+            "text",
+            "pmid",
+            "title",
+            "year",
+            "doi",
+            "doi_url",
+            "pmc_id",
+            "pmc_url",
+            "pubmed_url",
+            "journal",
+            "authors",
+            "publication_types",
+            "mesh_terms",
+            "chunk_index",
+            "chunk_total",
+            "score",
+        }
         assert set(results[0].keys()) == expected_keys
 
     def test_empty_collection_returns_empty_list(self, mock_deps):
