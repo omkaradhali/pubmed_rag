@@ -29,6 +29,9 @@ dependencies = [
     # Utilities
     "python-dotenv>=1.0",
     "tqdm>=4.67",
+    # API config + logging
+    "pydantic-settings>=2.0",
+    "python-json-logger>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -61,7 +64,7 @@ torch = [{ index = "pytorch-cpu" }]
 # ── Ruff (linter + formatter) ──────────────────────────────────────────────
 [tool.ruff]
 line-length = 100
-src = ["src"]
+src = ["src", "api"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]  # pycodestyle, pyflakes, isort, pyupgrade
