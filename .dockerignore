@@ -1,0 +1,24 @@
+# Version control
+.git
+
+# Python runtime artifacts
+.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.pytest_cache
+.ruff_cache
+
+# Data — provided as a bind mount at runtime, never baked into the image
+data/
+
+# Notebooks — not needed at runtime
+notebooks/
+
+# Secrets — never bake into the image
+.env
+.secrets.baseline
+
+# Docs and local tooling — not needed at runtime
+docs/
+.pre-commit-config.yaml

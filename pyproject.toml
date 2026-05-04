@@ -16,7 +16,8 @@ dependencies = [
     "requests>=2.32",
     # Text splitting
     "langchain-text-splitters>=0.3",
-    # Embeddings
+    # Embeddings — torch source is overridden to CPU-only build in [tool.uv.sources]
+    "torch>=2.0",
     "sentence-transformers>=3.3",
     # Vector store
     "chromadb>=0.6",
