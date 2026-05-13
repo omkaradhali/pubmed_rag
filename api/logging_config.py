@@ -17,6 +17,16 @@ class _RequestIdFilter(logging.Filter):
 
 
 def configure_logging(log_level: str = "INFO") -> None:
+    """
+    Configure the root logger with JSON formatting and request ID injection.
+
+    Replaces any existing handlers — intended to be called once at application startup.
+    Structured JSON output allows log aggregators (CloudWatch, ELK, Datadog) to index
+    and filter on individual fields without custom parsers.
+
+    Args:
+        log_level: Root logging level, e.g. "INFO", "DEBUG", "WARNING".
+    """
     handler = logging.StreamHandler()
     handler.setFormatter(
         JsonFormatter(

@@ -101,9 +101,9 @@ class PipelineResult:
     """
     Complete structured output from the RAG pipeline.
 
-    Design intent: use this dataclass directly in the FastAPI response model
-    (Day 11). All fields are populated on every run — the UI picks which
-    subset to render based on context (compact card vs. full detail view).
+    Design intent: use this dataclass directly in the FastAPI response model.
+    All fields are populated on every run — the UI picks which subset to
+    render based on context (compact card vs. full detail view).
     """
 
     # ── Query ──────────────────────────────────────────────────────────────────
@@ -247,8 +247,8 @@ def run_pipeline_structured(
     """
     Run the RAG pipeline and return a fully structured PipelineResult.
 
-    This is the primary entry point for Day 11 FastAPI — serialize the
-    returned dataclass directly into the API response model.
+    Primary entry point for the FastAPI layer. Serialize the returned
+    dataclass directly into the API response model.
 
     Args:
         query:     Question to answer.

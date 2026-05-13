@@ -44,9 +44,9 @@ dev = [
     "pre-commit>=4.0",
     "detect-secrets>=1.5",
 ]
-# Install separately on Day 14: uv pip install -e ".[eval]"
+
 eval = [
-    "ragas>=0.2",
+    "ragas>=0.1.21,<0.2",
     "datasets>=2.0",
 ]
 
@@ -70,6 +70,9 @@ src = ["src", "api"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]  # pycodestyle, pyflakes, isort, pyupgrade
+
+[tool.ruff.lint.per-file-ignores]
+"eval/*.py" = ["E501"]  # long question strings in EVAL_QUESTIONS are intentional
 
 # ── Pytest ─────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]

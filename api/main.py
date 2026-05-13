@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Configure logging and emit startup/shutdown log events."""
     settings = get_settings()
     configure_logging(settings.log_level)
     logger.info("pubmed_rag API starting", extra={"llm_provider": settings.llm_provider})
@@ -33,6 +34,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def inject_request_id(request: Request, call_next):
+    """Attach a request UUID, inject it into all log records, and return it as X-Request-ID."""
     rid = str(uuid.uuid4())
     token = request_id_var.set(rid)
     try:

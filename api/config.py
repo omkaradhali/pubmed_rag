@@ -5,6 +5,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """
+    Application settings loaded from environment variables and a .env file.
+
+    All fields have defaults suitable for local development with Ollama and ChromaDB.
+    Override any field via an environment variable or a .env file in the project root.
+    """
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -48,6 +55,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def check_required_keys(self) -> "Settings":
+        """Raise ValueError if a required API key is missing for the configured provider."""
         needs_openai = self.llm_provider == "openai" or self.embedding_provider == "openai"
         if needs_openai and not self.openai_api_key:
             raise ValueError(
@@ -65,4 +73,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """Return the cached application settings, parsed once at startup."""
     return Settings()
