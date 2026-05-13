@@ -18,7 +18,7 @@ Public API:
 import json
 import logging
 
-from pubmed_rag.embed import _MODEL_NAME, _model
+from pubmed_rag.embed import MODEL_NAME, get_model
 from pubmed_rag.vectorstore import get_collection
 
 _logger = logging.getLogger(__name__)
@@ -69,9 +69,9 @@ def retrieve(
             chunk_total       (int)       — total chunks from this abstract
             score             (float)     — cosine similarity in [0, 1]
     """
-    _logger.info("Embedding query with %s...", _MODEL_NAME)
+    _logger.info("Embedding query with %s...", MODEL_NAME)
 
-    query_vector = _model.encode([query]).tolist()[0]
+    query_vector = get_model().encode([query]).tolist()[0]
 
     collection = get_collection()
 

@@ -2,9 +2,13 @@
 Unit tests for generate.py.
 
 Tests cover format_context() output shape and content, generate_answer()
-provider routing, and edge cases (empty chunks, unknown provider).
+provider routing via match statement, and edge cases (empty chunks,
+unknown provider, haiku/sonnet aliases).
+
 All LLM provider calls are mocked — no real API calls made.
 """
+
+from unittest.mock import patch
 
 import pytest
 
@@ -93,77 +97,61 @@ def test_generate_answer_unknown_provider_raises(monkeypatch, sample_chunks):
 
 # generate_answer() — provider routing (mocked)
 #
-# _PROVIDERS is a module-level dict built at import time, so monkeypatch.setattr
-# on the function names won't update it. Patch the dict entries directly via
-# monkeypatch.setitem instead.
+# The match statement in generate_answer calls the private _call_* functions
+# directly, so we patch them by name rather than via a dispatch dict.
 
 
 def test_generate_answer_routes_to_anthropic(monkeypatch, sample_chunks):
-    import pubmed_rag.generate as gen_module
-
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
-
-    called_with = {}
-
-    def mock_call_anthropic(prompt: str) -> str:
-        called_with["prompt"] = prompt
-        return "Mocked anthropic answer [1]."
-
-    monkeypatch.setitem(gen_module._PROVIDERS, "anthropic", mock_call_anthropic)
-
-    result = generate_answer("Does pembrolizumab help?", sample_chunks)
-
-    assert result == "Mocked anthropic answer [1]."
-    assert "Does pembrolizumab help?" in called_with["prompt"]
+    with patch(
+        "pubmed_rag.generate._call_anthropic", return_value="Mocked anthropic answer [1]."
+    ) as mock:
+        result = generate_answer("Does pembrolizumab help?", sample_chunks)
+        assert result == "Mocked anthropic answer [1]."
+        prompt = mock.call_args[0][0]
+        assert "Does pembrolizumab help?" in prompt
 
 
 def test_generate_answer_routes_to_ollama(monkeypatch, sample_chunks):
-    import pubmed_rag.generate as gen_module
-
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
-
-    called_with = {}
-
-    def mock_call_ollama(prompt: str) -> str:
-        called_with["prompt"] = prompt
-        return "Mocked ollama answer [1]."
-
-    monkeypatch.setitem(gen_module._PROVIDERS, "ollama", mock_call_ollama)
-
-    result = generate_answer("Does pembrolizumab help?", sample_chunks)
-
-    assert result == "Mocked ollama answer [1]."
+    with patch(
+        "pubmed_rag.generate._call_ollama", return_value="Mocked ollama answer [1]."
+    ) as mock:
+        result = generate_answer("Does pembrolizumab help?", sample_chunks)
+        assert result == "Mocked ollama answer [1]."
+        mock.assert_called_once()
 
 
 def test_generate_answer_routes_to_openai(monkeypatch, sample_chunks):
-    import pubmed_rag.generate as gen_module
-
     monkeypatch.setenv("LLM_PROVIDER", "openai")
+    with patch(
+        "pubmed_rag.generate._call_openai", return_value="Mocked openai answer [1]."
+    ) as mock:
+        result = generate_answer("Does pembrolizumab help?", sample_chunks)
+        assert result == "Mocked openai answer [1]."
+        mock.assert_called_once()
 
-    def mock_call_openai(prompt: str) -> str:
-        return "Mocked openai answer [1]."
 
-    monkeypatch.setitem(gen_module._PROVIDERS, "openai", mock_call_openai)
+def test_generate_answer_routes_haiku_to_anthropic(monkeypatch, sample_chunks):
+    monkeypatch.setenv("LLM_PROVIDER", "haiku")
+    with patch("pubmed_rag.generate._call_anthropic", return_value="haiku answer [1].") as mock:
+        result = generate_answer("test", sample_chunks)
+        assert result == "haiku answer [1]."
+        assert mock.call_args[1]["default_model"] == "claude-haiku-4-5-20251001"
 
-    result = generate_answer("Does pembrolizumab help?", sample_chunks)
 
-    assert result == "Mocked openai answer [1]."
+def test_generate_answer_routes_sonnet_to_anthropic(monkeypatch, sample_chunks):
+    monkeypatch.setenv("LLM_PROVIDER", "sonnet")
+    with patch("pubmed_rag.generate._call_anthropic", return_value="sonnet answer [1].") as mock:
+        result = generate_answer("test", sample_chunks)
+        assert result == "sonnet answer [1]."
+        assert mock.call_args[1]["default_model"] == "claude-sonnet-4-6"
 
 
 def test_generate_answer_prompt_contains_context(monkeypatch, sample_chunks):
-    import pubmed_rag.generate as gen_module
-
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
-
-    captured = {}
-
-    def mock_call_anthropic(prompt: str) -> str:
-        captured["prompt"] = prompt
-        return "answer"
-
-    monkeypatch.setitem(gen_module._PROVIDERS, "anthropic", mock_call_anthropic)
-
-    generate_answer("test query", sample_chunks)
-
-    assert "11111111" in captured["prompt"]
-    assert "Pembrolizumab in MSI-H CRC" in captured["prompt"]
+    with patch("pubmed_rag.generate._call_anthropic", return_value="answer") as mock:
+        generate_answer("test query", sample_chunks)
+        prompt = mock.call_args[0][0]
+        assert "11111111" in prompt
+        assert "Pembrolizumab in MSI-H CRC" in prompt

@@ -1,13 +1,19 @@
 """
 embed.py — Embed text chunks into dense vectors using sentence-transformers.
 
-Loads all-MiniLM-L6-v2 once at module level. Each chunk gets a 384-float
-vector attached under the key "embedding". Vectors are L2-normalised by the
-model, so cosine similarity equals the dot product — used by retrieve.py.
+The model is loaded lazily on first call to get_model() — not at import time.
+This avoids a ~90MB HuggingFace download whenever the module is imported, and
+makes the module safe to import in tests without triggering network calls.
+
+Each chunk gets a 384-float vector attached under the key "embedding". Vectors
+are L2-normalised by the model, so cosine similarity equals the dot product —
+used by retrieve.py.
 
 Public API:
-    embed_chunks(chunks)           -> list[dict]   # attach embeddings in-place
-    save_embeddings(chunks, path)  -> None         # write chunks to JSONL
+    MODEL_NAME                            — name of the default embedding model
+    get_model()            -> SentenceTransformer  # lazy singleton accessor
+    embed_chunks(chunks)   -> list[dict]            # returns NEW dicts with embedding
+    save_embeddings(chunks, path) -> None           # write chunks to JSONL
 """
 
 import json
@@ -18,9 +24,19 @@ from sentence_transformers import SentenceTransformer
 
 _logger = logging.getLogger(__name__)
 
-# Loaded once at import time — ~1 s startup cost, zero cost on every call after.
-_MODEL_NAME = "all-MiniLM-L6-v2"
-_model = SentenceTransformer(_MODEL_NAME)
+MODEL_NAME = "all-MiniLM-L6-v2"
+
+# Loaded on the first call to get_model(). Never loaded at import time.
+_model: SentenceTransformer | None = None
+
+
+def get_model() -> SentenceTransformer:
+    """Return the shared embedding model, initialising it on first call."""
+    global _model
+    if _model is None:
+        _logger.info("Loading sentence-transformer model: %s", MODEL_NAME)
+        _model = SentenceTransformer(MODEL_NAME)
+    return _model
 
 
 # ── Core embedding logic ───────────────────────────────────────────────────────
@@ -28,35 +44,36 @@ _model = SentenceTransformer(_MODEL_NAME)
 
 def embed_chunks(chunks: list[dict]) -> list[dict]:
     """
-    Embed a list of chunk dicts and attach the vector to each.
+    Embed a list of chunk dicts and return new dicts with "embedding" added.
+
+    Does not mutate the input list — each returned dict is a shallow copy of
+    the original with an additional "embedding" key. Callers can safely reuse
+    the original list after this call.
 
     Passes all texts to the model in one call so it can batch them internally
     (default batch size: 32). Much faster than embedding one chunk at a time.
 
-    Each chunk dict gets a new key:
+    Each returned dict has a new key:
         embedding (list[float]) — 384-dimensional dense vector
 
     Args:
         chunks: List of chunk dicts from chunk.py (must have a "text" key).
 
     Returns:
-        The same list with "embedding" added to each dict.
+        New list of dicts — one per input chunk — each with "embedding" added.
     """
-
+    model = get_model()
     texts = [chunk["text"] for chunk in chunks]
 
-    _logger.info("Embedding %d chunks with %s...", len(texts), _MODEL_NAME)
+    _logger.info("Embedding %d chunks with %s...", len(texts), MODEL_NAME)
 
     # encode() returns a numpy array of shape (N, 384).
     # tolist() converts to plain Python floats — required for JSON serialisation.
-    vectors = _model.encode(texts, show_progress_bar=True).tolist()
-
-    for chunk, vector in zip(chunks, vectors):
-        chunk["embedding"] = vector
+    vectors = model.encode(texts, show_progress_bar=True).tolist()
 
     _logger.info("Done. Each vector has %d dimensions.", len(vectors[0]))
 
-    return chunks
+    return [{**chunk, "embedding": vector} for chunk, vector in zip(chunks, vectors)]
 
 
 # ── Persistence ────────────────────────────────────────────────────────────────
@@ -100,7 +117,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Load chunks
     chunks = []
 
     with open(args.input, encoding="utf-8") as f:
@@ -111,13 +127,11 @@ if __name__ == "__main__":
 
     _logger.info("Loaded %d chunks from %s", len(chunks), args.input)
 
-    # Embed and save
-    embed_chunks(chunks)
+    embedded = embed_chunks(chunks)
 
-    save_embeddings(chunks, args.output)
+    save_embeddings(embedded, args.output)
 
-    # Sanity check — print the first embedding's shape and a preview
-    first = chunks[0]
+    first = embedded[0]
 
     _logger.info(
         "Sample — pmid: %s | vector shape: (%d,) | first 5 values: %s",

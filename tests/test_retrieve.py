@@ -2,8 +2,8 @@
 Unit tests for retrieve.py.
 
 The retrieve() function calls two external dependencies:
-  - _model.encode()     (sentence-transformers, loads ~100MB)
-  - get_collection()    (ChromaDB, reads disk)
+  - get_model().encode()  (sentence-transformers, loads ~100MB)
+  - get_collection()      (ChromaDB, reads disk)
 
 Both are mocked here — these tests exercise the pure logic:
 distance→score conversion, min_score filtering, and result key shape.
@@ -56,11 +56,13 @@ def _meta(
 
 @pytest.fixture
 def mock_deps():
-    """Patch _model and get_collection at the point of use in retrieve.py."""
+    """Patch get_model and get_collection at the point of use in retrieve.py."""
     with (
-        patch("pubmed_rag.retrieve._model") as mock_model,
+        patch("pubmed_rag.retrieve.get_model") as mock_get_model,
         patch("pubmed_rag.retrieve.get_collection") as mock_get_col,
     ):
+        mock_model = MagicMock()
+        mock_get_model.return_value = mock_model
         # encode([query]) returns an object whose .tolist()[0] gives a flat vector
         mock_model.encode.return_value.tolist.return_value = [[0.1] * 384]
         mock_collection = MagicMock()

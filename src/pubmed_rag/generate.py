@@ -7,8 +7,13 @@ produce a grounded answer with inline [number] citations.
 
 LLM provider is selected via the LLM_PROVIDER environment variable:
     ollama     — local Ollama instance (default, no API cost)
-    anthropic  — Anthropic API (ANTHROPIC_API_KEY required)
+    anthropic  — Anthropic API, uses LLM_MODEL or claude-haiku-4-5-20251001
+    haiku      — Anthropic claude-haiku-4-5-20251001 (ANTHROPIC_API_KEY required)
+    sonnet     — Anthropic claude-sonnet-4-6 (ANTHROPIC_API_KEY required)
     openai     — OpenAI API (OPENAI_API_KEY required)
+
+For Anthropic aliases (anthropic / haiku / sonnet), LLM_MODEL overrides the
+per-alias default when set explicitly.
 
 Public API:
     format_context(chunks)          -> str
@@ -26,6 +31,14 @@ _DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 _DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 _DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
+# Per-alias default model for Anthropic-backed providers.
+# LLM_MODEL env var overrides these when explicitly set.
+_ANTHROPIC_PROVIDER_DEFAULTS: dict[str, str] = {
+    "anthropic": _DEFAULT_ANTHROPIC_MODEL,
+    "haiku": "claude-haiku-4-5-20251001",
+    "sonnet": "claude-sonnet-4-6",
+}
+
 _SYSTEM_PROMPT = (
     "You are a clinical literature assistant. "
     "Answer questions using ONLY the PubMed abstracts provided in the context. "
@@ -36,7 +49,7 @@ _SYSTEM_PROMPT = (
 )
 
 
-#  Context formatting
+# ── Context formatting ─────────────────────────────────────────────────────────
 
 
 def format_context(chunks: list[dict]) -> str:
@@ -68,7 +81,7 @@ def format_context(chunks: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
-#  Prompt assembly
+# ── Prompt assembly ────────────────────────────────────────────────────────────
 
 
 def build_prompt(query: str, context: str) -> str:
@@ -90,7 +103,7 @@ def build_prompt(query: str, context: str) -> str:
     )
 
 
-#  Provider-specific callers
+# ── Provider-specific callers ──────────────────────────────────────────────────
 
 
 def _call_ollama(prompt: str) -> str:
@@ -116,11 +129,19 @@ def _call_ollama(prompt: str) -> str:
     return response.choices[0].message.content
 
 
-def _call_anthropic(prompt: str) -> str:
-    """Call the Anthropic API (requires ANTHROPIC_API_KEY)."""
+def _call_anthropic(prompt: str, *, default_model: str = _DEFAULT_ANTHROPIC_MODEL) -> str:
+    """
+    Call the Anthropic API (requires ANTHROPIC_API_KEY).
+
+    Args:
+        prompt:        User prompt string.
+        default_model: Model used when LLM_MODEL env var is not set.
+                       Allows provider aliases (haiku, sonnet) to carry
+                       distinct per-alias defaults.
+    """
     import anthropic  # type: ignore[import-untyped]
 
-    model = os.getenv("LLM_MODEL", _DEFAULT_ANTHROPIC_MODEL)
+    model = os.getenv("LLM_MODEL") or default_model
     api_key = os.getenv("ANTHROPIC_API_KEY")
 
     if not api_key:
@@ -166,13 +187,7 @@ def _call_openai(prompt: str) -> str:
     return response.choices[0].message.content
 
 
-#  Main entry point
-
-_PROVIDERS = {
-    "ollama": _call_ollama,
-    "anthropic": _call_anthropic,
-    "openai": _call_openai,
-}
+# ── Main entry point ───────────────────────────────────────────────────────────
 
 
 def generate_answer(query: str, chunks: list[dict]) -> str:
@@ -180,7 +195,7 @@ def generate_answer(query: str, chunks: list[dict]) -> str:
     Generate a citation-grounded answer for a query given retrieved chunks.
 
     Formats the chunks into a numbered context block, builds a citation-enforced
-    prompt, and routes the call to the LLM provider set in LLM_PROVIDER.
+    prompt, and dispatches to the provider configured in LLM_PROVIDER.
 
     Args:
         query:  Natural language question from the user.
@@ -191,32 +206,38 @@ def generate_answer(query: str, chunks: list[dict]) -> str:
         LLM-generated answer string with inline [number] citations.
 
     Raises:
-        ValueError:       If LLM_PROVIDER is not one of: ollama, anthropic, openai.
-        EnvironmentError: If the required API key env var is missing.
+        ValueError: If LLM_PROVIDER is not one of the supported values.
+        OSError:    If the required API key env var is missing.
     """
     if not chunks:
         return "The retrieved literature does not address this question directly."
 
     provider = os.getenv("LLM_PROVIDER", _DEFAULT_PROVIDER)
 
-    if provider not in _PROVIDERS:
-        raise ValueError(
-            f"Unknown LLM_PROVIDER '{provider}'. Valid options: {', '.join(_PROVIDERS)}"
-        )
-
     context = format_context(chunks)
     prompt = build_prompt(query, context)
 
     _logger.info("Generating answer via provider=%s ...", provider)
 
-    answer = _PROVIDERS[provider](prompt)
+    match provider:
+        case "ollama":
+            answer = _call_ollama(prompt)
+        case "anthropic" | "haiku" | "sonnet":
+            answer = _call_anthropic(prompt, default_model=_ANTHROPIC_PROVIDER_DEFAULTS[provider])
+        case "openai":
+            answer = _call_openai(prompt)
+        case _:
+            raise ValueError(
+                f"Unknown LLM_PROVIDER '{provider}'. "
+                f"Valid options: ollama, anthropic, haiku, sonnet, openai"
+            )
 
     _logger.info("Generation complete.")
 
     return answer
 
 
-# CLI entrypoint
+# ── CLI entrypoint ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse

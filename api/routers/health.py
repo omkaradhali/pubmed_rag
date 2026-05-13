@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from api.schemas import HealthResponse
+from pubmed_rag import __version__
 
 router = APIRouter(tags=["health"])
 
@@ -17,4 +18,4 @@ async def health_check() -> HealthResponse:
     Use this endpoint to verify the server is up before sending queries.
     No authentication required.
     """
-    return HealthResponse(status="ok", version="0.1.0")
+    return HealthResponse(status="ok", version=__version__)

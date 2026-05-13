@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,12 +30,15 @@ class Settings(BaseSettings):
     # Embedding provider — miniml (default, local), medcpt (biomedical, local), openai (production)
     embedding_provider: str = "miniml"
 
-    # LLM provider — ollama (default, free), haiku, sonnet, openai
+    # LLM provider — ollama (default), anthropic, haiku, sonnet, openai
     llm_provider: str = "ollama"
     llm_model: str = "llama3.1:8b"
     ollama_base_url: str = "http://localhost:11434/v1"
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+
+    # CORS — restrict browser origins in production; comma-separated or JSON array
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
     # Corpus — specialty and time window
     pubmed_specialty: str = "oncology"
@@ -52,6 +55,19 @@ class Settings(BaseSettings):
 
     # API server
     log_level: str = "INFO"
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: str | list) -> list[str]:
+        """Accept both comma-separated string and JSON array for CORS_ORIGINS."""
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("["):
+                import json
+
+                return json.loads(v)
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
 
     @model_validator(mode="after")
     def check_required_keys(self) -> "Settings":

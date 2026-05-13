@@ -8,25 +8,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.config import get_settings
 from api.logging_config import configure_logging, request_id_var
 from api.routers import ask, health
+from pubmed_rag import __version__
 
 logger = logging.getLogger(__name__)
+
+_settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Configure logging and emit startup/shutdown log events."""
-    settings = get_settings()
-    configure_logging(settings.log_level)
-    logger.info("pubmed_rag API starting", extra={"llm_provider": settings.llm_provider})
+    configure_logging(_settings.log_level)
+    logger.info("pubmed_rag API starting", extra={"llm_provider": _settings.llm_provider})
     yield
     logger.info("pubmed_rag API stopped")
 
 
-app = FastAPI(title="pubmed_rag", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="pubmed_rag", version=__version__, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -433,6 +433,11 @@ def _run_incremental_update(reldate: int) -> None:
     Only the new records are chunked and embedded — existing corpus is untouched.
     ChromaDB upsert is idempotent: re-ingesting a PMID already in the collection
     overwrites it cleanly (same chunk IDs, updated metadata).
+
+    Records are not appended to abstracts.jsonl — that file is the full-ingest
+    snapshot and would accumulate duplicates across repeated incremental runs.
+    ChromaDB is the authoritative state; abstracts.jsonl is only written during
+    a full rebuild.
     """
     new_records = ingest(INGEST_QUERY, max_results=INGEST_MAX_RESULTS, reldate=reldate)
 
@@ -441,8 +446,6 @@ def _run_incremental_update(reldate: int) -> None:
         return
 
     _logger.info("Fetched %d new records.", len(new_records))
-
-    save_to_jsonl(new_records, ABSTRACTS_PATH)  # append for auditability
 
     new_chunks = chunk_records(new_records)
     _logger.info("Produced %d new chunks.", len(new_chunks))

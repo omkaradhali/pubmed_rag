@@ -8,13 +8,17 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -23,9 +27,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          key: ${{ runner.os }}-${{ matrix.python-version }}-uv-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            ${{ runner.os }}-uv-
+            ${{ runner.os }}-${{ matrix.python-version }}-uv-
 
       - name: Install dependencies
         run: uv sync --frozen --extra dev
@@ -33,5 +37,8 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
-      - name: Test
-        run: uv run pytest tests/ -v
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Test with coverage
+        run: uv run pytest tests/ -v --cov=src/pubmed_rag --cov-report=term-missing --cov-fail-under=35
