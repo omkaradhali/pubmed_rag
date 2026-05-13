@@ -37,6 +37,7 @@ wandb/
 
 # Data files (large — keep folder structure, exclude actual data)
 *.csv
+!eval/results.csv
 *.tsv
 *.parquet
 *.h5
