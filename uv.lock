@@ -2350,7 +2350,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-json-logger", specifier = ">=3.0" },
-    { name = "ragas", marker = "extra == 'eval'", specifier = ">=0.2" },
+    { name = "ragas", marker = "extra == 'eval'", specifier = "==0.4.3" },
     { name = "requests", specifier = ">=2.32" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "sentence-transformers", specifier = ">=3.3" },

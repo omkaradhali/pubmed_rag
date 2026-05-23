@@ -59,9 +59,7 @@ dev = [
 ]
 
 eval = [
-    # Note: evaluate.py uses the ragas 0.1.x private metric API (ragas.metrics._*).
-    # These imports work in ragas 0.4.x as well but may need updating in future releases.
-    "ragas>=0.2",
+    "ragas==0.4.3",  # pinned after silent metric-failure incident; revisit when migrating off private `ragas.metrics._*` imports
     "datasets>=2.0",
     "langchain-anthropic>=0.3",
     "langchain-community>=0.2",

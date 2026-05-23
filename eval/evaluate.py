@@ -31,6 +31,7 @@ from ragas.llms import LangchainLLMWrapper
 from ragas.metrics._answer_relevance import answer_relevancy
 from ragas.metrics._context_precision import context_precision
 from ragas.metrics._faithfulness import faithfulness
+from ragas.run_config import RunConfig
 
 from pubmed_rag.pipeline import run_pipeline_structured
 
@@ -286,11 +287,43 @@ def score_dataset(dataset: Dataset, llm):
     answer_relevancy.embeddings = embeddings
     context_precision.llm = llm
 
+    # max_retries=1 default + Haiku transient 429s caused context_precision to
+    # silently NaN across the entire 20-question run. Bump to 3 on all metrics.
+    faithfulness.max_retries = 3
+    answer_relevancy.max_retries = 3
+    context_precision.max_retries = 3
+
+    run_config = RunConfig(
+        max_workers=2,
+        max_retries=3,
+        timeout=600,
+    )
+
     result = evaluate(
         dataset=dataset,
         metrics=[faithfulness, answer_relevancy, context_precision],
+        raise_exceptions=True,
+        run_config=run_config,
     )
-    return result.to_pandas()
+    df = result.to_pandas()
+    # ragas 0.4.x renames the input columns on output; map back to legacy
+    # names so print_results, save_csv, and v0.1-shaped CSVs stay consistent.
+    df = df.rename(
+        columns={
+            "user_input": "question",
+            "response": "answer",
+            "retrieved_contexts": "contexts",
+            "reference": "ground_truth",
+        }
+    )
+    empty_cols = [
+        c for c in ("faithfulness", "answer_relevancy", "context_precision") if df[c].isna().all()
+    ]
+    if empty_cols:
+        raise RuntimeError(
+            f"RAGAS produced empty results for: {empty_cols}. Check judge LLM + retries."
+        )
+    return df
 
 
 # ── Step 4: print_results ─────────────────────────────────────────────────────
@@ -383,10 +416,11 @@ def main() -> None:
     _logger.info("Scoring with RAGAS — calls Claude internally, may take ~1-2 min...")
     df = score_dataset(dataset, llm)
 
-    print_results(df)
-
+    # Save first so a crash in print_results doesn't discard ~1hr of scoring work.
     if args.output is not None:
         save_csv(df, args.output)
+
+    print_results(df)
 
 
 if __name__ == "__main__":
