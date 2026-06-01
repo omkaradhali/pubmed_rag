@@ -18,8 +18,6 @@ client = TestClient(app)
 
 
 # Test data helpers
-
-
 def _source(**overrides) -> SourceChunk:
     defaults = dict(
         number=1,
@@ -71,8 +69,6 @@ def mock_pipeline():
 
 
 # GET /health
-
-
 class TestHealth:
     def test_returns_200(self):
         assert client.get("/health").status_code == 200
@@ -87,8 +83,6 @@ class TestHealth:
 
 
 # POST /ask
-
-
 class TestAsk:
     def test_happy_path_returns_200(self, mock_pipeline):
         response = client.post("/ask", json={"query": "What treats HER2+ breast cancer?"})

@@ -29,8 +29,8 @@ class AskRequest(BaseModel):
         default="incremental",
         description=(
             "Pipeline mode. "
-            '"incremental" (default) — queries the existing corpus, fast (~1–3 sec). '
-            '"full" — wipes and rebuilds the corpus from scratch before querying, slow (~2–5 min). '
+            '"incremental" (default) — queries the existing corpus, fast (~1-3 sec). '
+            '"full" — wipes and rebuilds the corpus from scratch before querying, slow (~2-5 min). '
             "Use incremental for all normal queries."
         ),
     )
@@ -48,7 +48,7 @@ class AskRequest(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "Minimum cosine similarity threshold [0.0–1.0]. "
+            "Minimum cosine similarity threshold [0.0-1.0]. "
             "Chunks scoring below this value are excluded from the context. "
             "0.0 returns all top-k chunks regardless of relevance score."
         ),
@@ -76,7 +76,7 @@ class SourceChunkResponse(BaseModel):
     journal: str = Field(description="Journal name. Empty string if not available.")
     year: str = Field(description="Publication year, e.g. 2024.")
     score: float = Field(
-        description="Cosine similarity between this chunk and the query [0.0–1.0]. "
+        description="Cosine similarity between this chunk and the query [0.0-1.0]. "
         "Higher means more relevant."
     )
     pubmed_url: str = Field(
@@ -130,14 +130,14 @@ class AskResponse(BaseModel):
         description="ISO date of the last corpus update, derived from abstracts.jsonl mtime."
     )
     avg_score: float = Field(
-        description="Average cosine similarity of all retrieved chunks [0.0–1.0]. "
+        description="Average cosine similarity of all retrieved chunks [0.0-1.0]. "
         "Drives the confidence_tier calculation."
     )
     confidence_tier: str = Field(
         description=(
             "Retrieval confidence derived from avg_score. "
             '"High" — avg ≥ 0.70. '
-            '"Medium" — avg 0.50–0.69. '
+            '"Medium" — avg 0.50-0.69. '
             '"Low" — avg < 0.50. '
             '"None" — no chunks were retrieved.'
         )

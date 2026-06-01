@@ -62,3 +62,7 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Coverage + ad-hoc backups
+.coverage
+*.bak

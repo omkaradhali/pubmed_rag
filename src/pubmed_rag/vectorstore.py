@@ -1,9 +1,13 @@
 """
 vectorstore.py — Seed and query a ChromaDB collection from embeddings.jsonl.
 
-Loads embedded chunks from JSONL and upserts them into a persistent ChromaDB
-collection keyed by "{pmid}_chunk_{chunk_index}". Seeding is idempotent —
-running it twice is safe, existing IDs are overwritten not duplicated.
+Loads embedded child chunks from JSONL and upserts them into a persistent
+ChromaDB collection keyed by chunk_id (e.g. "41980200_p0_c2", D-042). Seeding
+is idempotent — running it twice overwrites existing IDs in place.
+
+Only CHILD chunks live in ChromaDB. Parents are persisted by parents.py to a
+sidecar JSONL and resolved at retrieval time. The vectorstore enforces this
+invariant defensively — any non-child input is dropped with a warning.
 
 ChromaDB metadata only supports scalar types (str, int, float, bool).
 List fields (authors, publication_types, mesh_terms) are stored as JSON
@@ -36,9 +40,7 @@ _CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma_db")
 _UPSERT_BATCH_SIZE = 500
 
 
-# ── Collection access ──────────────────────────────────────────────────────────
-
-
+# Collection access
 def get_collection() -> chromadb.Collection:
     """
     Open (or create) the persistent ChromaDB collection.
@@ -60,16 +62,17 @@ def get_collection() -> chromadb.Collection:
     )
 
 
-# ── Metadata helpers ───────────────────────────────────────────────────────────
-
-
+# Metadata helpers
 def _chunk_to_metadata(c: dict) -> dict:
     """
-    Convert an embedded chunk dict to a ChromaDB-safe metadata dict.
+    Convert an embedded child chunk dict to a ChromaDB-safe metadata dict.
 
     ChromaDB only accepts scalar values (str, int, float, bool).
     List fields are serialized with json.dumps and deserialized in retrieve.py.
     Scalar fields fall back to "" so metadata is always complete.
+
+    v0.2 (D-042) adds chunk_id, chunk_role, parent_id so retrieve.py can
+    look up the parent text and dedup hits by parent_id.
     """
     return {
         # Scalar identifiers
@@ -81,25 +84,32 @@ def _chunk_to_metadata(c: dict) -> dict:
         "pmc_id": c.get("pmc_id", ""),
         "pmc_url": c.get("pmc_url", ""),
         "journal": c.get("journal", ""),
+        # Parent-child schema (v0.2). chunk_role is always "child" in ChromaDB
+        # but stored explicitly to keep metadata self-describing for debugging.
+        "chunk_id": c.get("chunk_id", ""),
+        "chunk_role": c.get("chunk_role", "child"),
+        "parent_id": c.get("parent_id", ""),
         # List fields serialized as JSON strings
         "authors": json.dumps(c.get("authors", [])),
         "publication_types": json.dumps(c.get("publication_types", [])),
         "mesh_terms": json.dumps(c.get("mesh_terms", [])),
-        # Chunk position
+        # Chunk position (within the parent — v0.2)
         "chunk_index": c.get("chunk_index", 0),
         "chunk_total": c.get("chunk_total", 1),
     }
 
 
-# ── Seeding ────────────────────────────────────────────────────────────────────
-
-
+# Seeding
 def upsert_chunks(chunks: list[dict]) -> int:
     """
-    Upsert a list of in-memory embedded chunk dicts into ChromaDB.
+    Upsert a list of in-memory embedded child chunks into ChromaDB.
 
     Handles batching and metadata serialization. Used by pipeline.py for
     incremental updates where chunks are already in memory (no JSONL write).
+
+    Defensive filter: any non-child chunks are dropped with a warning. The
+    embed step should have removed them already (D-042 sub-decision 4) — this
+    guard catches mistakes by callers that bypass embed_chunks.
 
     Args:
         chunks: List of embedded chunk dicts (output of embed.embed_chunks).
@@ -110,15 +120,26 @@ def upsert_chunks(chunks: list[dict]) -> int:
     if not chunks:
         return 0
 
+    children = [c for c in chunks if c.get("chunk_role", "child") == "child"]
+    n_skipped = len(chunks) - len(children)
+    if n_skipped:
+        _logger.warning(
+            "Dropping %d non-child chunks from upsert — only children belong in ChromaDB.",
+            n_skipped,
+        )
+
+    if not children:
+        return 0
+
     collection = get_collection()
-    n_batches = math.ceil(len(chunks) / _UPSERT_BATCH_SIZE)
+    n_batches = math.ceil(len(children) / _UPSERT_BATCH_SIZE)
     total = 0
 
-    for i in range(0, len(chunks), _UPSERT_BATCH_SIZE):
-        batch = chunks[i : i + _UPSERT_BATCH_SIZE]
+    for i in range(0, len(children), _UPSERT_BATCH_SIZE):
+        batch = children[i : i + _UPSERT_BATCH_SIZE]
 
         collection.upsert(
-            ids=[f"{c['pmid']}_chunk_{c['chunk_index']}" for c in batch],
+            ids=[c["chunk_id"] for c in batch],
             embeddings=[c["embedding"] for c in batch],
             documents=[c["text"] for c in batch],
             metadatas=[_chunk_to_metadata(c) for c in batch],
@@ -168,8 +189,7 @@ def seed_collection(path: str | os.PathLike = "data/embeddings.jsonl") -> int:
     return total
 
 
-# ── CLI entrypoint ─────────────────────────────────────────────────────────────
-
+# CLI entrypoint
 if __name__ == "__main__":
     import argparse
 

@@ -49,7 +49,7 @@ _SYSTEM_PROMPT = (
 )
 
 
-# ── Context formatting ─────────────────────────────────────────────────────────
+# Context formatting
 
 
 def format_context(chunks: list[dict]) -> str:
@@ -81,9 +81,7 @@ def format_context(chunks: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
-# ── Prompt assembly ────────────────────────────────────────────────────────────
-
-
+# Prompt assembly
 def build_prompt(query: str, context: str) -> str:
     """
     Assemble the full user-turn prompt from a query and formatted context block.
@@ -103,9 +101,7 @@ def build_prompt(query: str, context: str) -> str:
     )
 
 
-# ── Provider-specific callers ──────────────────────────────────────────────────
-
-
+# Provider-specific callers
 def _call_ollama(prompt: str) -> str:
     """Call a local Ollama instance via its OpenAI-compatible API."""
     from openai import OpenAI  # type: ignore[import-untyped]
@@ -187,9 +183,7 @@ def _call_openai(prompt: str) -> str:
     return response.choices[0].message.content
 
 
-# ── Main entry point ───────────────────────────────────────────────────────────
-
-
+# Main entry point
 def generate_answer(query: str, chunks: list[dict]) -> str:
     """
     Generate a citation-grounded answer for a query given retrieved chunks.
@@ -237,8 +231,7 @@ def generate_answer(query: str, chunks: list[dict]) -> str:
     return answer
 
 
-# ── CLI entrypoint ─────────────────────────────────────────────────────────────
-
+# CLI entrypoint
 if __name__ == "__main__":
     import argparse
 
@@ -267,10 +260,10 @@ if __name__ == "__main__":
 
     chunks = retrieve(args.query, n_results=args.n, min_score=args.min_score)
 
-    print(f"\n── Retrieved {len(chunks)} chunks ──\n")
+    print(f"\n-- Retrieved {len(chunks)} chunks --\n")
 
     answer = generate_answer(args.query, chunks)
 
-    print("── Answer ──\n")
+    print("-- Answer --\n")
     print(answer)
     print()

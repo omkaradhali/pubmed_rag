@@ -1,12 +1,14 @@
 """
-Unit tests for retrieve.py.
+Unit tests for retrieve.py — v0.2 parent-child resolution + dedup (D-042).
 
-The retrieve() function calls two external dependencies:
+The retrieve() function calls three external dependencies:
   - get_model().encode()  (sentence-transformers, loads ~100MB)
   - get_collection()      (ChromaDB, reads disk)
+  - get_parent()          (parents.py sidecar store)
 
-Both are mocked here — these tests exercise the pure logic:
-distance→score conversion, min_score filtering, and result key shape.
+All three are mocked here — these tests exercise the pure logic:
+distance→score conversion, min_score filtering, parent-text resolution,
+dedup-by-parent_id, and result key shape.
 """
 
 from unittest.mock import MagicMock, patch
@@ -35,8 +37,11 @@ def _meta(
     year: str = "2023",
     chunk_index: int = 0,
     chunk_total: int = 1,
+    chunk_id: str = "12345_p0_c0",
+    parent_id: str = "12345_p0",
+    chunk_role: str = "child",
 ) -> dict:
-    """Minimal ChromaDB metadata dict matching the schema written by vectorstore.py."""
+    """Minimal ChromaDB metadata dict matching the v0.2 schema (D-042)."""
     return {
         "pmid": pmid,
         "title": title,
@@ -51,15 +56,43 @@ def _meta(
         "mesh_terms": "[]",
         "chunk_index": chunk_index,
         "chunk_total": chunk_total,
+        # v0.2 (D-042)
+        "chunk_id": chunk_id,
+        "chunk_role": chunk_role,
+        "parent_id": parent_id,
+    }
+
+
+def _parent_doc(chunk_id: str = "12345_p0", text: str = "Full parent context.") -> dict:
+    """Minimal ParentDoc dict matching what parents.get_parent returns."""
+    return {
+        "chunk_id": chunk_id,
+        "chunk_role": "parent",
+        "parent_id": None,
+        "pmid": "12345",
+        "title": "Test Paper",
+        "year": "2023",
+        "text": text,
+        "chunk_index": 0,
+        "chunk_total": 1,
+        "doi": "",
+        "doi_url": "",
+        "pmc_id": "",
+        "pmc_url": "",
+        "authors": [],
+        "journal": "",
+        "publication_types": [],
+        "mesh_terms": [],
     }
 
 
 @pytest.fixture
 def mock_deps():
-    """Patch get_model and get_collection at the point of use in retrieve.py."""
+    """Patch get_model, get_collection, and get_parent at the point of use."""
     with (
         patch("pubmed_rag.retrieve.get_model") as mock_get_model,
         patch("pubmed_rag.retrieve.get_collection") as mock_get_col,
+        patch("pubmed_rag.retrieve.get_parent") as mock_get_parent,
     ):
         mock_model = MagicMock()
         mock_get_model.return_value = mock_model
@@ -67,16 +100,18 @@ def mock_deps():
         mock_model.encode.return_value.tolist.return_value = [[0.1] * 384]
         mock_collection = MagicMock()
         mock_get_col.return_value = mock_collection
-        yield mock_collection
+        # Default: every parent_id resolves to a stub parent doc.
+        mock_get_parent.side_effect = lambda chunk_id: _parent_doc(
+            chunk_id=chunk_id, text=f"parent[{chunk_id}]"
+        )
+        yield {"collection": mock_collection, "get_parent": mock_get_parent}
 
 
 # Tests
-
-
 class TestRetrieve:
     def test_distance_converts_to_score(self, mock_deps):
-        mock_deps.query.return_value = _chroma_response(
-            documents=["some chunk"],
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["child chunk"],
             metadatas=[_meta()],
             distances=[0.3],
         )
@@ -86,19 +121,22 @@ class TestRetrieve:
 
     def test_score_rounded_to_four_decimal_places(self, mock_deps):
         distance = 0.123456789
-        mock_deps.query.return_value = _chroma_response(
+        mock_deps["collection"].query.return_value = _chroma_response(
             documents=["text"],
             metadatas=[_meta()],
             distances=[distance],
         )
-        results = retrieve("query")
+        results = retrieve("query", n_results=1)
         assert results[0]["score"] == round(1.0 - distance, 4)
 
     def test_min_score_filters_low_matches(self, mock_deps):
-        # distances 0.8 and 0.2 → scores 0.2 and 0.8; only the 0.8 passes min_score=0.5
-        mock_deps.query.return_value = _chroma_response(
+        # distances 0.8 and 0.2 → scores 0.2 and 0.8; only 0.8 passes min_score=0.5
+        mock_deps["collection"].query.return_value = _chroma_response(
             documents=["weak", "strong"],
-            metadatas=[_meta(pmid="1"), _meta(pmid="2")],
+            metadatas=[
+                _meta(pmid="1", chunk_id="1_p0_c0", parent_id="1_p0"),
+                _meta(pmid="2", chunk_id="2_p0_c0", parent_id="2_p0"),
+            ],
             distances=[0.8, 0.2],
         )
         results = retrieve("query", n_results=2, min_score=0.5)
@@ -106,23 +144,26 @@ class TestRetrieve:
         assert results[0]["score"] == pytest.approx(0.8, abs=1e-4)
 
     def test_min_score_zero_returns_all_results(self, mock_deps):
-        mock_deps.query.return_value = _chroma_response(
+        mock_deps["collection"].query.return_value = _chroma_response(
             documents=["a", "b", "c"],
-            metadatas=[_meta(pmid=str(i)) for i in range(3)],
+            metadatas=[
+                _meta(pmid=str(i), chunk_id=f"{i}_p0_c0", parent_id=f"{i}_p0") for i in range(3)
+            ],
             distances=[0.9, 0.5, 0.1],
         )
         results = retrieve("query", n_results=3, min_score=0.0)
         assert len(results) == 3
 
     def test_result_has_required_keys(self, mock_deps):
-        mock_deps.query.return_value = _chroma_response(
-            documents=["chunk text"],
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["child text"],
             metadatas=[_meta()],
             distances=[0.2],
         )
-        results = retrieve("query")
+        results = retrieve("query", n_results=1)
         expected_keys = {
             "text",
+            "child_text",
             "pmid",
             "title",
             "year",
@@ -135,6 +176,8 @@ class TestRetrieve:
             "authors",
             "publication_types",
             "mesh_terms",
+            "chunk_id",
+            "parent_id",
             "chunk_index",
             "chunk_total",
             "score",
@@ -142,14 +185,85 @@ class TestRetrieve:
         assert set(results[0].keys()) == expected_keys
 
     def test_empty_collection_returns_empty_list(self, mock_deps):
-        mock_deps.query.return_value = _chroma_response(documents=[], metadatas=[], distances=[])
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=[], metadatas=[], distances=[]
+        )
         assert retrieve("query") == []
 
     def test_all_results_filtered_by_high_min_score(self, mock_deps):
-        mock_deps.query.return_value = _chroma_response(
+        mock_deps["collection"].query.return_value = _chroma_response(
             documents=["a", "b"],
-            metadatas=[_meta(pmid="1"), _meta(pmid="2")],
+            metadatas=[
+                _meta(pmid="1", chunk_id="1_p0_c0", parent_id="1_p0"),
+                _meta(pmid="2", chunk_id="2_p0_c0", parent_id="2_p0"),
+            ],
             distances=[0.7, 0.6],  # scores 0.3 and 0.4 — both below min_score=0.9
         )
         results = retrieve("query", n_results=2, min_score=0.9)
         assert results == []
+
+
+class TestParentResolutionAndDedup:
+    def test_text_field_is_parent_text(self, mock_deps):
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["the child fragment"],
+            metadatas=[_meta()],
+            distances=[0.2],
+        )
+        results = retrieve("query", n_results=1)
+        assert results[0]["text"] == "parent[12345_p0]"
+        assert results[0]["child_text"] == "the child fragment"
+
+    def test_dedup_by_parent_id_keeps_best_child(self, mock_deps):
+        # 3 children — first two share parent A (best at distance 0.1),
+        # third belongs to parent B. After dedup we expect 2 unique parents.
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["A-best", "A-worse", "B-only"],
+            metadatas=[
+                _meta(chunk_id="X_p0_c0", parent_id="X_p0"),
+                _meta(chunk_id="X_p0_c1", parent_id="X_p0"),
+                _meta(chunk_id="Y_p0_c0", parent_id="Y_p0"),
+            ],
+            distances=[0.1, 0.2, 0.3],
+        )
+        results = retrieve("query", n_results=5)
+        assert len(results) == 2
+        # First result is the best-scoring child for parent X
+        assert results[0]["parent_id"] == "X_p0"
+        assert results[0]["child_text"] == "A-best"
+        assert results[1]["parent_id"] == "Y_p0"
+
+    def test_dedup_respects_n_results_cap(self, mock_deps):
+        # 4 distinct parents available; only top 2 requested.
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["a", "b", "c", "d"],
+            metadatas=[_meta(chunk_id=f"P{i}_p0_c0", parent_id=f"P{i}_p0") for i in range(4)],
+            distances=[0.1, 0.2, 0.3, 0.4],
+        )
+        results = retrieve("query", n_results=2)
+        assert len(results) == 2
+        assert [r["parent_id"] for r in results] == ["P0_p0", "P1_p0"]
+
+    def test_missing_parent_falls_back_to_child_text(self, mock_deps):
+        # Simulate a parents.jsonl/ChromaDB out-of-sync state.
+        mock_deps["get_parent"].side_effect = KeyError("missing")
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["the child fragment"],
+            metadatas=[_meta()],
+            distances=[0.2],
+        )
+        results = retrieve("query", n_results=1)
+        assert len(results) == 1
+        # Fallback: parent text == child text
+        assert results[0]["text"] == "the child fragment"
+        assert results[0]["child_text"] == "the child fragment"
+
+    def test_chunk_id_and_parent_id_populated_in_result(self, mock_deps):
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["c"],
+            metadatas=[_meta(chunk_id="42_p3_c7", parent_id="42_p3")],
+            distances=[0.2],
+        )
+        results = retrieve("query", n_results=1)
+        assert results[0]["chunk_id"] == "42_p3_c7"
+        assert results[0]["parent_id"] == "42_p3"

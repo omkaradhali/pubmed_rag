@@ -38,8 +38,6 @@ def sample_chunks() -> list[dict]:
 
 
 # format_context()
-
-
 def test_format_context_numbering(sample_chunks):
     result = format_context(sample_chunks)
     assert "[1]" in result
@@ -81,9 +79,7 @@ def test_format_context_single_chunk(sample_chunks):
     assert "[2]" not in result
 
 
-# generate_answer() — edge cases
-
-
+# generate_answer() — edge casess
 def test_generate_answer_empty_chunks_returns_fallback():
     result = generate_answer("any question", [])
     assert "does not address" in result.lower()

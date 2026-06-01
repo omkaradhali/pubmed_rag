@@ -39,16 +39,22 @@ def get_model() -> SentenceTransformer:
     return _model
 
 
-# ── Core embedding logic ───────────────────────────────────────────────────────
-
-
+# Core logic
 def embed_chunks(chunks: list[dict]) -> list[dict]:
     """
-    Embed a list of chunk dicts and return new dicts with "embedding" added.
+    Embed child chunks and return new dicts with "embedding" added.
+
+    Only chunks with chunk_role == "child" are embedded (D-042 sub-decision 4).
+    Parents pass through the role filter and are not returned — embedding them
+    would pollute the vector index. Pipeline orchestration persists parents to
+    parents.jsonl via parents.save_parents() before calling this function.
+
+    For backward-compatibility with v0.1 chunk dicts (which had no chunk_role
+    field), chunks missing the role key are treated as children — this keeps
+    older test fixtures and ad-hoc scripts working.
 
     Does not mutate the input list — each returned dict is a shallow copy of
-    the original with an additional "embedding" key. Callers can safely reuse
-    the original list after this call.
+    the original with an additional "embedding" key.
 
     Passes all texts to the model in one call so it can batch them internally
     (default batch size: 32). Much faster than embedding one chunk at a time.
@@ -60,12 +66,23 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
         chunks: List of chunk dicts from chunk.py (must have a "text" key).
 
     Returns:
-        New list of dicts — one per input chunk — each with "embedding" added.
+        New list of dicts — one per CHILD input chunk — each with "embedding" added.
+        Parents in the input are dropped.
     """
-    model = get_model()
-    texts = [chunk["text"] for chunk in chunks]
+    children = [c for c in chunks if c.get("chunk_role", "child") == "child"]
+    n_skipped = len(chunks) - len(children)
 
-    _logger.info("Embedding %d chunks with %s...", len(texts), MODEL_NAME)
+    if not children:
+        _logger.warning("No child chunks to embed (input had %d items).", len(chunks))
+        return []
+
+    if n_skipped:
+        _logger.info("Skipping %d parents — only children are embedded.", n_skipped)
+
+    model = get_model()
+    texts = [chunk["text"] for chunk in children]
+
+    _logger.info("Embedding %d child chunks with %s...", len(texts), MODEL_NAME)
 
     # encode() returns a numpy array of shape (N, 384).
     # tolist() converts to plain Python floats — required for JSON serialisation.
@@ -73,12 +90,10 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
 
     _logger.info("Done. Each vector has %d dimensions.", len(vectors[0]))
 
-    return [{**chunk, "embedding": vector} for chunk, vector in zip(chunks, vectors)]
+    return [{**chunk, "embedding": vector} for chunk, vector in zip(children, vectors)]
 
 
-# ── Persistence ────────────────────────────────────────────────────────────────
-
-
+# Persistence
 def save_embeddings(chunks: list[dict], path: str | os.PathLike) -> None:
     """
     Write embedded chunks to a JSONL file.
@@ -94,8 +109,7 @@ def save_embeddings(chunks: list[dict], path: str | os.PathLike) -> None:
     _logger.info("Saved %d embedded chunks to %s", len(chunks), path)
 
 
-# ── CLI entrypoint ─────────────────────────────────────────────────────────────
-
+# CLI entrypoint
 if __name__ == "__main__":
     import argparse
 

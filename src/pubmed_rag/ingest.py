@@ -44,7 +44,7 @@ load_dotenv()
 
 _logger = logging.getLogger(__name__)
 
-# ── Constants ──────────────────────────────────────────────────────────────────
+# Constants
 
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -85,9 +85,7 @@ def _api_params() -> dict[str, str]:
     return params
 
 
-# ── Step 1: search ─────────────────────────────────────────────────────────────
-
-
+# Step 1: search
 def search_pubmed(
     query: str,
     max_results: int = 10,
@@ -150,9 +148,7 @@ def search_pubmed(
     return pmids
 
 
-# ── Step 2: fetch ──────────────────────────────────────────────────────────────
-
-
+# Step 2: fetch
 def _parse_pubmed_xml(xml_text: str) -> list[dict]:
     """
     Parse a PubmedArticleSet XML blob into a list of record dicts.
@@ -219,7 +215,7 @@ def _parse_pubmed_xml(xml_text: str) -> list[dict]:
             medline_el = article.find(".//PubDate/MedlineDate")
             year = medline_el.text[:4] if medline_el is not None else ""
 
-        # ── Link-out identifiers ───────────────────────────────────────────────
+        # Link-out identifiers
         # <ArticleIdList> holds identifiers assigned by different systems.
         # We extract two that are useful for direct linking:
         #
@@ -250,7 +246,7 @@ def _parse_pubmed_xml(xml_text: str) -> list[dict]:
         doi_url = f"https://doi.org/{doi}" if doi else ""
         pmc_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmc_id}/" if pmc_id else ""
 
-        # ── Authors ───────────────────────────────────────────────────────────
+        # Authors
         # <AuthorList> contains <Author> elements — either individual people with
         # <LastName>/<Initials>, or collective bodies with <CollectiveName>
         # (e.g. consortium groups like "TCGA Research Network").
@@ -268,13 +264,13 @@ def _parse_pubmed_xml(xml_text: str) -> list[dict]:
             elif collective_el is not None and collective_el.text:
                 authors.append(collective_el.text.strip())
 
-        # ── Journal ───────────────────────────────────────────────────────────
+        # Journal
         # Full journal title (e.g. "Nature Medicine") from <Journal><Title>.
         # Prefer full title over <ISOAbbreviation> for readability in citations.
         journal_el = article.find(".//Journal/Title")
         journal = journal_el.text.strip() if journal_el is not None else ""
 
-        # ── Publication types ─────────────────────────────────────────────────
+        # Publication types
         # NLM assigns one or more publication type tags per article.
         # "Journal Article" is nearly always present; clinically useful values
         # include "Randomized Controlled Trial", "Review", "Meta-Analysis",
@@ -286,7 +282,7 @@ def _parse_pubmed_xml(xml_text: str) -> list[dict]:
             if el.text
         ]
 
-        # ── MeSH terms ────────────────────────────────────────────────────────
+        # MeSH terms
         # Medical Subject Headings assigned by NLM curators after indexing.
         # Only <DescriptorName> is captured (not sub-qualifiers like "diagnosis"
         # or "drug therapy") to keep the list concise and query-friendly.
@@ -373,9 +369,7 @@ def fetch_abstracts(pmids: list[str]) -> list[dict]:
     return all_records
 
 
-# ── Combined entry point ───────────────────────────────────────────────────────
-
-
+# Combined entry point
 def ingest(
     query: str,
     max_results: int = 10,
@@ -403,9 +397,7 @@ def ingest(
     return fetch_abstracts(pmids)
 
 
-# ── Persistence ────────────────────────────────────────────────────────────────
-
-
+# Persistence
 def save_to_jsonl(records: list[dict], path: str | os.PathLike) -> int:
     """
     Append records to a JSONL file — one JSON object per line.
@@ -431,8 +423,7 @@ def save_to_jsonl(records: list[dict], path: str | os.PathLike) -> int:
     return written
 
 
-# ── CLI entrypoint ─────────────────────────────────────────────────────────────
-
+# CLI entrypoint
 if __name__ == "__main__":
     import argparse
 
