@@ -34,7 +34,7 @@ import json
 import logging
 import os
 
-from pubmed_rag.embed import MODEL_NAME, get_model
+from pubmed_rag.embed import MODEL_NAME, embed_query
 from pubmed_rag.parents import get_parent
 from pubmed_rag.rerank import rerank
 from pubmed_rag.vectorstore import get_collection
@@ -194,7 +194,7 @@ def retrieve(
         rerank_enabled = _RERANK_ENABLED
 
     _logger.info("Embedding query with %s...", MODEL_NAME)
-    query_vector = get_model().encode([query]).tolist()[0]
+    query_vector = embed_query(query)
 
     collection = get_collection()
 

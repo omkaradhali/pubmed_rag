@@ -1,18 +1,25 @@
 """
 embed.py — Embed text chunks into dense vectors using sentence-transformers.
 
-The model is loaded lazily on first call to get_model() — not at import time.
-This avoids a ~90MB HuggingFace download whenever the module is imported, and
-makes the module safe to import in tests without triggering network calls.
+The embedding model is selected by the EMBEDDING_PROVIDER env var (ADR-034):
+miniml (all-MiniLM-L6-v2, 384-dim, default) or bge (BAAI/bge-large-en-v1.5,
+1024-dim). It loads lazily on first call to get_model() — not at import time —
+so importing the module triggers no download and is test-safe.
 
-Each chunk gets a 384-float vector attached under the key "embedding". Vectors
-are L2-normalised by the model, so cosine similarity equals the dot product —
-used by retrieve.py.
+Passages (chunk text) are embedded with no prefix; queries go through
+embed_query(), which applies the provider's query instruction prefix (BGE is
+asymmetric — see below). All vectors are L2-normalised, so cosine similarity
+equals the dot product — used by retrieve.py.
+
+Switching providers requires re-embedding the whole corpus and rebuilding the
+vector store (different model → different, often larger vectors → new collection).
 
 Public API:
-    MODEL_NAME                            — name of the default embedding model
+    EMBEDDING_PROVIDER                    — active provider (env-selected)
+    MODEL_NAME                            — resolved HF model id
     get_model()            -> SentenceTransformer  # lazy singleton accessor
-    embed_chunks(chunks)   -> list[dict]            # returns NEW dicts with embedding
+    embed_query(query)     -> list[float]           # query vector (with prefix)
+    embed_chunks(chunks)   -> list[dict]            # NEW dicts with embedding (children)
     save_embeddings(chunks, path) -> None           # write chunks to JSONL
 """
 
@@ -24,19 +31,63 @@ from sentence_transformers import SentenceTransformer
 
 _logger = logging.getLogger(__name__)
 
-MODEL_NAME = "all-MiniLM-L6-v2"
+# Embedding provider dispatch (EMBEDDING_PROVIDER env var, see ADR-034).
+#
+# Both providers are sentence-transformers bi-encoders. The correctness-critical
+# difference is query/passage SYMMETRY:
+#   * miniml (all-MiniLM-L6-v2) — SYMMETRIC: query and passage encoded the same,
+#     no prefix.
+#   * bge (BAAI/bge-large-en-v1.5) — ASYMMETRIC: expects a short instruction
+#     prepended to the QUERY only. Omitting it silently degrades retrieval;
+#     passages get no prefix.
+#
+# Each entry: (hf_model_id, query_instruction_prefix).
+_PROVIDERS: dict[str, tuple[str, str]] = {
+    "miniml": ("all-MiniLM-L6-v2", ""),
+    "bge": (
+        "BAAI/bge-large-en-v1.5",
+        "Represent this sentence for searching relevant passages: ",
+    ),
+}
+
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "miniml").lower()
+
+if EMBEDDING_PROVIDER not in _PROVIDERS:
+    raise ValueError(
+        f"EMBEDDING_PROVIDER={EMBEDDING_PROVIDER!r} is not supported here. "
+        f"Choose one of: {', '.join(_PROVIDERS)}."
+    )
+
+MODEL_NAME, _QUERY_PREFIX = _PROVIDERS[EMBEDDING_PROVIDER]
 
 # Loaded on the first call to get_model(). Never loaded at import time.
 _model: SentenceTransformer | None = None
 
 
 def get_model() -> SentenceTransformer:
-    """Return the shared embedding model, initialising it on first call."""
+    """Return the shared embedding model, initialising it on first call.
+
+    Which model loads is set by EMBEDDING_PROVIDER (default: miniml). The corpus
+    and the query must be embedded by the SAME model — vectors from different
+    models are geometrically incompatible — so re-seeding and query-time
+    retrieval must run with the same EMBEDDING_PROVIDER.
+    """
     global _model
     if _model is None:
-        _logger.info("Loading sentence-transformer model: %s", MODEL_NAME)
+        _logger.info("Loading embedding model: %s (provider=%s)", MODEL_NAME, EMBEDDING_PROVIDER)
         _model = SentenceTransformer(MODEL_NAME)
     return _model
+
+
+def embed_query(query: str) -> list[float]:
+    """Embed one query string, applying the provider's query instruction prefix.
+
+    Asymmetric models (BGE) need a prefix on the query but not on passages;
+    symmetric models (miniml) use an empty prefix. Centralising it here keeps
+    retrieve.py provider-agnostic. Returns a plain list of floats (L2-normalised).
+    """
+    text = _QUERY_PREFIX + query
+    return get_model().encode([text], normalize_embeddings=True).tolist()[0]
 
 
 # Core logic
@@ -60,7 +111,8 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
     (default batch size: 32). Much faster than embedding one chunk at a time.
 
     Each returned dict has a new key:
-        embedding (list[float]) — 384-dimensional dense vector
+        embedding (list[float]) — dense vector; dimension depends on the provider
+                                  (miniml=384, bge=1024)
 
     Args:
         chunks: List of chunk dicts from chunk.py (must have a "text" key).
@@ -84,9 +136,10 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
 
     _logger.info("Embedding %d child chunks with %s...", len(texts), MODEL_NAME)
 
-    # encode() returns a numpy array of shape (N, 384).
+    # encode() returns a numpy array of shape (N, dim). normalize_embeddings keeps
+    # vectors unit-length (required for BGE's cosine usage; harmless for miniml).
     # tolist() converts to plain Python floats — required for JSON serialisation.
-    vectors = model.encode(texts, show_progress_bar=True).tolist()
+    vectors = model.encode(texts, show_progress_bar=True, normalize_embeddings=True).tolist()
 
     _logger.info("Done. Each vector has %d dimensions.", len(vectors[0]))
 

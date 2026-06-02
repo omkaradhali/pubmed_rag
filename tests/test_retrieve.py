@@ -95,15 +95,13 @@ def mock_deps():
     that want to verify rerank ordering set mock_deps["rerank"].side_effect.
     """
     with (
-        patch("pubmed_rag.retrieve.get_model") as mock_get_model,
+        patch("pubmed_rag.retrieve.embed_query") as mock_embed_query,
         patch("pubmed_rag.retrieve.get_collection") as mock_get_col,
         patch("pubmed_rag.retrieve.get_parent") as mock_get_parent,
         patch("pubmed_rag.retrieve.rerank") as mock_rerank,
     ):
-        mock_model = MagicMock()
-        mock_get_model.return_value = mock_model
-        # encode([query]) returns an object whose .tolist()[0] gives a flat vector
-        mock_model.encode.return_value.tolist.return_value = [[0.1] * 384]
+        # embed_query(query) returns a flat query vector
+        mock_embed_query.return_value = [0.1] * 384
         mock_collection = MagicMock()
         mock_get_col.return_value = mock_collection
         # Default: every parent_id resolves to a stub parent doc.
