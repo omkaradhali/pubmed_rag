@@ -162,7 +162,7 @@ RAGAS baseline evaluated on a 500-abstract demo corpus using 20 clinical oncolog
 
 **Faithfulness at 0.84** confirms the core architecture is sound: the LLM cites what it was given and refuses to answer from training data when context is absent.
 
-Answer relevancy and context precision are low because a 500-abstract general corpus is unlikely to contain relevant documents for specific clinical questions. Both metrics improve substantially with a full specialty corpus (see ADR-035 for production corpus sizing).
+Answer relevancy and context precision are low because a 500-abstract general corpus is unlikely to contain relevant documents for specific clinical questions. Both metrics improve substantially with a full specialty corpus (see ADR-035 for corpus scope).
 
 Run the evaluation against your own deployment:
 
@@ -196,7 +196,7 @@ pubmed_rag/
 ├── eval/
 │   └── evaluate.py         # RAGAS evaluation script (20 questions, 3 metrics)
 ├── tests/                  # pytest unit tests (46 tests)
-├── docs/decisions/         # architecture decision records (ADR-033–039)
+├── docs/decisions/         # architecture decision records (ADR-033–035, 039)
 ├── Dockerfile
 ├── docker-compose.yml
 └── .env.example
@@ -220,16 +220,13 @@ The Docker image pre-bakes the `all-MiniLM-L6-v2` model weights to avoid downloa
 
 ## Architecture Decision Records
 
-Design decisions for the production deployment are documented in `docs/decisions/`:
+Design decisions for the open-source architecture are documented in `docs/decisions/`:
 
 | ADR | Decision |
 |---|---|
 | [ADR-033](docs/decisions/ADR-033-vector-store-backend.md) | Pluggable vector store: ChromaDB (dev) / Qdrant (prod) |
 | [ADR-034](docs/decisions/ADR-034-embedding-provider.md) | Pluggable embedding: all-MiniLM (dev) / text-embedding-3-small (prod) |
-| [ADR-035](docs/decisions/ADR-035-corpus-scope.md) | Corpus scope: oncology, 10 years, ~1.5M abstracts |
-| [ADR-036](docs/decisions/ADR-036-pipeline-orchestration.md) | Pipeline scheduling: EventBridge + ECS Fargate |
-| [ADR-037](docs/decisions/ADR-037-observability.md) | Observability: Logfire (app) + Langfuse (RAG tracing) |
-| [ADR-038](docs/decisions/ADR-038-llm-production-default.md) | Production LLM: Claude Sonnet |
+| [ADR-035](docs/decisions/ADR-035-corpus-scope.md) | Corpus scope: oncology default, configurable depth |
 | [ADR-039](docs/decisions/ADR-039-multi-specialty-corpus.md) | Multi-specialty support via metadata filter |
 
 ---

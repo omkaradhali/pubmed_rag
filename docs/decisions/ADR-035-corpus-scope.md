@@ -5,9 +5,9 @@
 
 ## Context
 
-"All of PubMed" (~37M abstracts) was considered as the production corpus target. At production
-scale with text-embedding-3-small (1,536 dims), all of PubMed would require ~1TB of vector
-storage and ~$740 to embed — significant but technically feasible.
+"All of PubMed" (~37M abstracts) was considered as the corpus target. Embedding and serving all
+of PubMed is technically feasible but costly at scale, and most of it is irrelevant to any single
+clinical use case.
 
 However, "all of PubMed" includes veterinary medicine, materials science, dentistry, and dozens
 of fields unrelated to the system's primary use case. A general corpus degrades retrieval
@@ -18,10 +18,9 @@ better product: faster retrieval, higher relevance, and a clearer value proposit
 
 Default corpus: **oncology / cancer research, last 10 years** (MeSH: "Neoplasms", 2016–2026).
 
-- ~1.5M abstracts
-- ~$9 one-time embedding cost (text-embedding-3-small)
-- ~19GB Qdrant storage
-- ~$1/year incremental update cost (~150K new oncology papers/year)
+This is ~1.5M abstracts — large enough to cover the clinically relevant literature, small enough
+to embed and serve cheaply. (Deployment-specific cost and storage sizing live with the private
+production infra, not in this repo.)
 
 Corpus depth is configurable via `PUBMED_YEARS_BACK` env var (default: 10). This drives the
 `reldate` filter already implemented in `ingest.py`. Users can reduce scope:
@@ -35,9 +34,9 @@ PUBMED_YEARS_BACK=2    # ~300K abstracts — OSS demo with real data
 Specialty is configurable via `PUBMED_SPECIALTY` env var, backed by a `SPECIALTY_QUERIES`
 mapping dict. This makes adding new specialties a one-line addition to the mapping.
 
-Pipeline scheduling: EventBridge cron (every 48–72 hours) triggers an ECS Fargate run-task
-that runs the incremental pipeline (`reldate=3`), fetching only the last 3 days of new papers
-and upserting to Qdrant. Full re-ingestion is an explicit opt-in via `mode=full`.
+Incremental updates use the `reldate` filter in `ingest.py` — fetch only the last N days of new
+papers and upsert — so the corpus stays current without a full rebuild. Full re-ingestion is an
+explicit opt-in via `mode=full`. How the incremental run is scheduled is a deployment concern.
 
 ## Consequences
 
