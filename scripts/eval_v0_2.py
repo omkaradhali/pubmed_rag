@@ -42,8 +42,14 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 _logger = logging.getLogger("eval_v0_2")
 
 
-def score_with_timeout(dataset, llm, timeout_s: int = 120):
-    """Same as eval.evaluate.score_dataset but with a longer per-job timeout."""
+def score_with_timeout(dataset, llm, timeout_s: int = 600):
+    """Same as eval.evaluate.score_dataset but with a longer per-job timeout.
+
+    Defaults match the known-good config from cf83e19: timeout=600, workers=2.
+    The faithfulness and context_precision metrics each make several sequential
+    judge calls per question; at 120s/4-workers they time out and silently
+    return NaN (observed 2026-06-02). 600s/2-workers is the safe envelope.
+    """
     embeddings = LangchainEmbeddingsWrapper(
         LCHFEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     )
@@ -52,7 +58,7 @@ def score_with_timeout(dataset, llm, timeout_s: int = 120):
     answer_relevancy.embeddings = embeddings
     context_precision.llm = llm
 
-    run_config = RunConfig(timeout=timeout_s, max_retries=3, max_workers=4)
+    run_config = RunConfig(timeout=timeout_s, max_retries=3, max_workers=2)
 
     result = evaluate(
         dataset=dataset,
@@ -95,7 +101,7 @@ def print_defensive(df) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("eval/results_v0_2.csv"))
-    parser.add_argument("--timeout", type=int, default=120, help="RAGAS per-job timeout, seconds")
+    parser.add_argument("--timeout", type=int, default=600, help="RAGAS per-job timeout, seconds")
     args = parser.parse_args()
 
     llm = build_evaluator_llm()
