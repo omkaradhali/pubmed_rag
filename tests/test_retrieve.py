@@ -88,11 +88,17 @@ def _parent_doc(chunk_id: str = "12345_p0", text: str = "Full parent context.") 
 
 @pytest.fixture
 def mock_deps():
-    """Patch get_model, get_collection, and get_parent at the point of use."""
+    """Patch get_model, get_collection, get_parent, and the reranker at use site.
+
+    The reranker defaults to an identity passthrough so these tests exercise the
+    stage-1 dense + dedup logic in isolation (and never download MedCPT). Tests
+    that want to verify rerank ordering set mock_deps["rerank"].side_effect.
+    """
     with (
         patch("pubmed_rag.retrieve.get_model") as mock_get_model,
         patch("pubmed_rag.retrieve.get_collection") as mock_get_col,
         patch("pubmed_rag.retrieve.get_parent") as mock_get_parent,
+        patch("pubmed_rag.retrieve.rerank") as mock_rerank,
     ):
         mock_model = MagicMock()
         mock_get_model.return_value = mock_model
@@ -104,7 +110,14 @@ def mock_deps():
         mock_get_parent.side_effect = lambda chunk_id: _parent_doc(
             chunk_id=chunk_id, text=f"parent[{chunk_id}]"
         )
-        yield {"collection": mock_collection, "get_parent": mock_get_parent}
+        # Default reranker: identity — preserve stage-1 order so dense-path
+        # assertions hold without loading a cross-encoder.
+        mock_rerank.side_effect = lambda query, candidates, **kwargs: candidates
+        yield {
+            "collection": mock_collection,
+            "get_parent": mock_get_parent,
+            "rerank": mock_rerank,
+        }
 
 
 # Tests
@@ -267,3 +280,53 @@ class TestParentResolutionAndDedup:
         results = retrieve("query", n_results=1)
         assert results[0]["chunk_id"] == "42_p3_c7"
         assert results[0]["parent_id"] == "42_p3"
+
+
+class TestReranking:
+    def test_rerank_reorders_over_dense(self, mock_deps):
+        # Dense order is parent A (0.1) then parent B (0.2). A reranker that
+        # reverses the pool should flip the returned parents to B, then A.
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["A child", "B child"],
+            metadatas=[
+                _meta(chunk_id="A_p0_c0", parent_id="A_p0"),
+                _meta(chunk_id="B_p0_c0", parent_id="B_p0"),
+            ],
+            distances=[0.1, 0.2],
+        )
+        mock_deps["rerank"].side_effect = lambda query, candidates, **kwargs: list(
+            reversed(candidates)
+        )
+        results = retrieve("query", n_results=2)
+        assert [r["parent_id"] for r in results] == ["B_p0", "A_p0"]
+        mock_deps["rerank"].assert_called_once()
+
+    def test_score_field_stays_cosine_after_rerank(self, mock_deps):
+        # Even when rerank reorders, `score` reports the stage-1 cosine value.
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["A child", "B child"],
+            metadatas=[
+                _meta(chunk_id="A_p0_c0", parent_id="A_p0"),
+                _meta(chunk_id="B_p0_c0", parent_id="B_p0"),
+            ],
+            distances=[0.1, 0.2],  # cosine 0.9 and 0.8
+        )
+        mock_deps["rerank"].side_effect = lambda query, candidates, **kwargs: list(
+            reversed(candidates)
+        )
+        results = retrieve("query", n_results=2)
+        # B is returned first (reranked) but keeps its cosine 0.8
+        assert results[0]["parent_id"] == "B_p0"
+        assert results[0]["score"] == pytest.approx(0.8, abs=1e-4)
+        # No internal rerank_score leaks into the result schema
+        assert "rerank_score" not in results[0]
+
+    def test_rerank_disabled_skips_reranker(self, mock_deps):
+        mock_deps["collection"].query.return_value = _chroma_response(
+            documents=["a child"],
+            metadatas=[_meta()],
+            distances=[0.2],
+        )
+        results = retrieve("query", n_results=1, rerank_enabled=False)
+        assert len(results) == 1
+        mock_deps["rerank"].assert_not_called()

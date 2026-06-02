@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # Embedding provider — miniml (default, local), medcpt (biomedical, local), openai (production)
     embedding_provider: str = "miniml"
 
+    # Reranker — cross-encoder second stage (v0.2, Day 18)
+    rerank_enabled: bool = True
+    rerank_model: str = "ncbi/MedCPT-Cross-Encoder"
+    rerank_pool: int = 30  # child candidates shortlisted before reranking
+
     # LLM provider — ollama (default), anthropic, haiku, sonnet, openai
     llm_provider: str = "ollama"
     llm_model: str = "llama3.1:8b"
