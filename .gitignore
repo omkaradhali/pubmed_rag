@@ -43,6 +43,7 @@ wandb/
 *.h5
 *.hdf5
 *.jsonl
+!eval/questions.sample.jsonl
 data/raw/
 data/processed/
 data/chroma_db/
