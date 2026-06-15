@@ -135,7 +135,7 @@ class PipelineResult:
     avg_score: float = 0.0
     min_score_retrieved: float = 0.0
     max_score_retrieved: float = 0.0
-    # "High" (avg ≥ 0.70) | "Medium" (0.50–0.70) | "Low" (< 0.50) | "None" (no chunks)
+    # "High" (avg ≥ 0.70) | "Medium" (0.50-0.70) | "Low" (< 0.50) | "None" (no chunks)
     confidence_tier: str = "None"
 
     # Coverage

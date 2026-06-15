@@ -222,7 +222,7 @@ def _parse_pubmed_xml(xml_text: str) -> list[dict]:
         #   IdType="doi"  — Digital Object Identifier, present on ~90% of modern
         #                   articles. doi.org is the canonical resolver.
         #   IdType="pmc"  — PubMed Central ID, present only when free full text
-        #                   is available in PMC (~40–50% of PubMed records).
+        #                   is available in PMC (~40-50% of PubMed records).
         #                   This is the "LinkOut — More Resources" link on PubMed.
         #
         # Sample XML structure:

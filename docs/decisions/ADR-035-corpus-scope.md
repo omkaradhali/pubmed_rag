@@ -16,7 +16,7 @@ better product: faster retrieval, higher relevance, and a clearer value proposit
 
 ## Decision
 
-Default corpus: **oncology / cancer research, last 10 years** (MeSH: "Neoplasms", 2016–2026).
+Default corpus: **oncology / cancer research, last 10 years** (MeSH: "Neoplasms", 2016-2026).
 
 This is ~1.5M abstracts — large enough to cover the clinically relevant literature, small enough
 to embed and serve cheaply. (Deployment-specific cost and storage sizing live with the private
@@ -44,4 +44,4 @@ explicit opt-in via `mode=full`. How the incremental run is scheduled is a deplo
 - Multi-specialty support (see ADR-039) requires adding `specialty` metadata through the stack
 - `PUBMED_YEARS_BACK` affects initial setup time and storage cost linearly
 - The 10-year default captures the majority of clinically relevant oncology literature
-  (most guidelines reference evidence from the last 5–10 years)
+  (most guidelines reference evidence from the last 5-10 years)

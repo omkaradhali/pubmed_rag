@@ -46,13 +46,13 @@ _DEFAULT_MIN_SCORE = 0.0
 
 # Over-fetch factor (rerank OFF): ask Chroma for OVERFETCH_MULTIPLIER × n_results
 # child hits so dedup-by-parent still leaves ~n_results unique parents. 4× is
-# generous for short PubMed abstracts where most parents have 1–3 children.
+# generous for short PubMed abstracts where most parents have 1-3 children.
 _OVERFETCH_MULTIPLIER = 4
 
 # Candidate pool size (rerank ON): a larger fixed shortlist gives the cross-
 # encoder room to promote a relevant-but-buried child that the bi-encoder
 # ranked low. ~30 is the precision/latency sweet spot for short abstracts on
-# CPU (research: retrieve top-20–30 → rerank → top-5). Env-overridable.
+# CPU (research: retrieve top-20-30 → rerank → top-5). Env-overridable.
 _RERANK_POOL = int(os.getenv("RERANK_POOL", "30"))
 
 # Reranking on by default; set RERANK_ENABLED=false to fall back to dense-only.

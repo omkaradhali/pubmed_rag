@@ -55,7 +55,7 @@ vectorstore.py ─────────────────  ChromaDB (de
 
 The pipeline runs in two modes:
 
-- **`incremental`** (default) — queries the pre-seeded vector store. Fast, ~1–3 sec, mostly LLM latency.
+- **`incremental`** (default) — queries the pre-seeded vector store. Fast, ~1-3 sec, mostly LLM latency.
 - **`full`** — wipes and rebuilds the corpus from scratch before querying. Use when corpus is stale.
 
 ---
@@ -196,7 +196,7 @@ pubmed_rag/
 ├── eval/
 │   └── evaluate.py         # RAGAS evaluation script (20 questions, 3 metrics)
 ├── tests/                  # pytest unit tests (46 tests)
-├── docs/decisions/         # architecture decision records (ADR-033–035, 039)
+├── docs/decisions/         # architecture decision records (ADR-033-035, 039)
 ├── Dockerfile
 ├── docker-compose.yml
 └── .env.example

@@ -7,7 +7,7 @@
 
 The project uses `all-MiniLM-L6-v2` (sentence-transformers) for development — it is free,
 runs on CPU, and requires no API keys. However, its 256-token limit causes silent truncation
-of PubMed structured abstracts (which commonly run 300–500 tokens), and its 384-dimensional
+of PubMed structured abstracts (which commonly run 300-500 tokens), and its 384-dimensional
 vectors have limited capacity to distinguish between semantically similar biomedical documents
 at production corpus scale.
 

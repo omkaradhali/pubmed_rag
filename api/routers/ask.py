@@ -30,10 +30,10 @@ async def ask(body: AskRequest) -> AskResponse:
     4. The LLM generates an answer with inline [N] references — each [N] maps to `sources[N-1]`.
 
     **Choosing a mode:**
-    - `incremental` (default) — queries the existing pre-seeded corpus. Fast (~1–3 sec,
+    - `incremental` (default) — queries the existing pre-seeded corpus. Fast (~1-3 sec,
       mostly LLM latency). Use this for all normal queries.
     - `full` — wipes the ChromaDB collection, re-ingests from PubMed, re-embeds, and
-      rebuilds the index before querying. Slow (~2–5 min). Use only to refresh a stale corpus.
+      rebuilds the index before querying. Slow (~2-5 min). Use only to refresh a stale corpus.
 
     **Refreshing the corpus without a full rebuild:**
     Set `reldate=30` (or any number of days) with `mode=incremental` to fetch and upsert
@@ -41,7 +41,7 @@ async def ask(body: AskRequest) -> AskResponse:
 
     **Interpreting confidence_tier:**
     - `High` — avg cosine similarity ≥ 0.70. Strong corpus coverage for this query.
-    - `Medium` — avg 0.50–0.69. Reasonable match; answer may miss some nuance.
+    - `Medium` — avg 0.50-0.69. Reasonable match; answer may miss some nuance.
     - `Low` — avg < 0.50. Weak match; treat the answer with caution.
     - `None` — no chunks retrieved. Answer will state the corpus has no relevant content.
 

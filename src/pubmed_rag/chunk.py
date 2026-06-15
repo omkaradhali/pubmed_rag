@@ -129,7 +129,7 @@ def chunk_record(
       5. Return parents and children in a flat list, parents first, then all
          children for that parent, then the next parent's group, etc.
 
-    For PubMed abstracts (~250 words) most records produce 1 parent + 1–3
+    For PubMed abstracts (~250 words) most records produce 1 parent + 1-3
     children. PMC full-text (future) will produce multiple parents per
     record with many children each.
 
