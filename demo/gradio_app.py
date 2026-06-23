@@ -72,10 +72,10 @@ _CSS = """
     font-weight: 700 !important;
     text-transform: uppercase !important;
     letter-spacing: 0.08em !important;
-    color: #6b7280 !important;
+    color: #374151 !important;
     margin: 0 0 10px 0 !important;
     padding-bottom: 8px !important;
-    border-bottom: 1px solid #e5e7eb !important;
+    border-bottom: 1px solid #d1d5db !important;
 }
 
 /* ── Query input ─────────────────────────────────────────── */
