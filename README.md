@@ -12,11 +12,14 @@ A production-grade RAG pipeline for clinical literature. Fetch PubMed abstracts,
 
 ## Features
 
-- **Full ingestion pipeline** — PubMed E-utilities → chunking → sentence-transformer embeddings → ChromaDB
+- **Full ingestion pipeline** — PubMed E-utilities → parent-child chunking → sentence-transformer embeddings → ChromaDB
+- **Two-stage retrieval** — bi-encoder dense retrieval shortlists candidates; `ncbi/MedCPT-Cross-Encoder` reranks for clinical relevance
 - **Citation-enforced generation** — the LLM is instructed to cite every claim inline; hallucinated sources are structurally prevented
+- **HL7 CDS Hooks integration** — `GET /cds-services` discovery + `POST /cds-services/pubmed-rag` patient-view hook; plug into any CDS Hooks-compatible EHR
+- **Gradio demo UI** — browser-based interface at `demo/gradio_app.py`; no API tooling required
 - **Pluggable providers** — swap the LLM (Ollama, Anthropic, OpenAI) and embedding model via a single env var
 - **FastAPI backend** — structured JSON responses, request ID tracing, Swagger docs at `/docs`
-- **RAGAS evaluation suite** — 20 clinical oncology questions covering mechanism, biomarker, prognosis, treatment, and epidemiology query types
+- **Dual evaluation suite** — RAGAS (LLM-as-judge) + deterministic recall@k/MRR/nDCG against a 97-question labeled benchmark
 - **Docker + CI** — ready-to-run Docker image and GitHub Actions workflow included
 - **Production path** — swap ChromaDB → Qdrant and `all-MiniLM-L6-v2` → `text-embedding-3-small` with two env var changes
 
@@ -52,6 +55,8 @@ vectorstore.py ─────────────────  ChromaDB (de
                                           ▼
                                  answer + cited sources
 ```
+
+v0.2 adds a two-stage retrieval layer: children are retrieved densely, reranked by `ncbi/MedCPT-Cross-Encoder`, then deduped to unique parents before generation. Retrieval metrics at N=97: **recall@20 = 0.97 · MRR = 0.95**.
 
 The pipeline runs in two modes:
 
@@ -100,6 +105,78 @@ curl -s -X POST http://localhost:8001/ask \
   -H "Content-Type: application/json" \
   -d '{"query": "What biomarkers predict response to immunotherapy?"}' | jq .
 ```
+
+### Gradio demo UI
+
+```bash
+pip install gradio httpx
+API_BASE_URL=http://localhost:8001 python demo/gradio_app.py
+# Open http://localhost:7860
+```
+
+---
+
+## HL7 CDS Hooks Integration
+
+pubmed_rag implements the [HL7 CDS Hooks 1.0](https://cds-hooks.hl7.org/1.0/) specification. Any CDS Hooks-compatible EHR can subscribe to the pubmed-rag service and receive cited oncology evidence cards during the patient-view workflow.
+
+### Discovery
+
+```bash
+curl http://localhost:8001/cds-services
+```
+
+```json
+{
+  "services": [{
+    "hook": "patient-view",
+    "title": "Oncology Evidence Search (pubmed_rag)",
+    "description": "Search 35M+ PubMed oncology abstracts and receive a cited, LLM-synthesised evidence summary.",
+    "id": "pubmed-rag",
+    "prefetch": {}
+  }]
+}
+```
+
+### Query the service
+
+```bash
+curl -s -X POST http://localhost:8001/cds-services/pubmed-rag \
+  -H "Content-Type: application/json" \
+  -d '{
+    "hookInstance": "example-001",
+    "hook": "patient-view",
+    "context": {
+      "userId": "Practitioner/dr-smith",
+      "patientId": "patient-42",
+      "query": "What is the first-line treatment for HER2-positive metastatic breast cancer?"
+    }
+  }' | jq .
+```
+
+The service returns a CDS card with the synthesized answer, inline citations, and direct PubMed links:
+
+```json
+{
+  "cards": [{
+    "uuid": "...",
+    "summary": "Evidence: The first-line treatment is dual HER2 blockade with trastuzumab...",
+    "detail": "Full answer with [1][2][3] inline citations...\n\n**Sources**\n1. ...",
+    "indicator": "info",
+    "source": {
+      "label": "pubmed_rag — Oncology Evidence Service",
+      "url": "https://pubmed.ncbi.nlm.nih.gov"
+    },
+    "links": [
+      { "label": "[1] PMID 42041395 — Post-Chemotherapy Antibody-Based...", "url": "https://pubmed.ncbi.nlm.nih.gov/42041395/", "type": "absolute" }
+    ]
+  }]
+}
+```
+
+**EHR integration:** register `http://your-host:8001` as a CDS Hooks service base URL in your EHR's CDS Hooks configuration. The `context.query` field accepts the clinical question directly; in a full integration this can be synthesized from the patient's FHIR problem list or encounter diagnosis.
+
+---
 
 ### Step-by-step pipeline (CLI)
 
@@ -152,23 +229,44 @@ See `.env.example` for the full list including observability variables (Logfire,
 
 ## Evaluation
 
-RAGAS baseline evaluated on a 500-abstract demo corpus using 20 clinical oncology questions:
+Evaluated on a 5,000-abstract oncology corpus across two metric families.
 
-| Metric | Score | Notes |
+### RAGAS (LLM-as-judge, 20 clinical oncology questions)
+
+| Metric | v0.1 (500 abstracts) | v0.2 (5,000 abstracts) |
 |---|---|---|
-| Faithfulness | **0.84** | Strong — generation stays within retrieved context; citation enforcement works |
-| Answer relevancy | 0.33 | Scales with corpus size |
-| Context precision | 0.15 | Scales with corpus size |
+| Faithfulness | 0.84 | **0.91** |
+| Answer relevancy | 0.33 | **0.81** |
+| Context precision | 0.15 | 0.53 |
 
-**Faithfulness at 0.84** confirms the core architecture is sound: the LLM cites what it was given and refuses to answer from training data when context is absent.
+Faithfulness of 0.91 confirms citation enforcement is working: 91% of answer statements are grounded in retrieved context.
 
-Answer relevancy and context precision are low because a 500-abstract general corpus is unlikely to contain relevant documents for specific clinical questions. Both metrics improve substantially with a full specialty corpus (see ADR-035 for corpus scope).
+### Deterministic retrieval metrics (97 labeled questions, zero variance)
 
-Run the evaluation against your own deployment:
+Evaluated against a 97-question oncology benchmark with gold PubMed labels. These metrics use no LLM judge — results are identical across runs.
+
+| Metric | Score |
+|---|---|
+| Recall@5 | 0.67 |
+| Recall@10 | 0.82 |
+| **Recall@20** | **0.97** |
+| **MRR** | **0.95** |
+| nDCG@20 | 0.90 |
+
+Recall@20 of 0.97 means the correct abstract appears in the top 20 results for 97% of questions. MRR of 0.95 means the first relevant result is ranked first or second on average.
+
+### Run the evaluation
 
 ```bash
+# RAGAS (requires ANTHROPIC_API_KEY)
 uv pip install -e ".[eval]"
-ANTHROPIC_API_KEY=sk-... python eval/evaluate.py --output eval/results.csv
+python scripts/eval_v0_2.py --output eval/results.csv
+
+# Deterministic retrieval metrics only (no LLM cost)
+python scripts/eval_v0_2.py \
+  --questions eval/questions.sample.jsonl \
+  --output eval/results_retrieval.csv \
+  --no-ragas
 ```
 
 ---
@@ -192,10 +290,17 @@ pubmed_rag/
 │   ├── logging_config.py   # JSON logging + request ID
 │   └── routers/
 │       ├── health.py       # GET /health
-│       └── ask.py          # POST /ask
+│       ├── ask.py          # POST /ask
+│       └── cds_hooks.py    # GET /cds-services, POST /cds-services/pubmed-rag
+├── demo/
+│   └── gradio_app.py       # Gradio web UI (calls /ask, runs on port 7860)
 ├── eval/
-│   └── evaluate.py         # RAGAS evaluation script (20 questions, 3 metrics)
-├── tests/                  # pytest unit tests (46 tests)
+│   ├── evaluate.py         # RAGAS evaluation (20 questions, 3 metrics)
+│   ├── retrieval_metrics.py # recall@k, MRR, nDCG@k (deterministic, zero variance)
+│   └── questions.sample.jsonl  # 15-question public eval sample
+├── scripts/
+│   └── eval_v0_2.py        # unified eval driver (RAGAS + deterministic, --questions flag)
+├── tests/                  # pytest unit tests (74 tests)
 ├── docs/decisions/         # architecture decision records (ADR-033-035, 039)
 ├── Dockerfile
 ├── docker-compose.yml

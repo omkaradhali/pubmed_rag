@@ -116,11 +116,7 @@ def ask_pubmed(query: str) -> tuple[str, str]:
 
 
 def build_demo() -> gr.Blocks:
-    with gr.Blocks(
-        title="PubMed RAG — Oncology Evidence Search",
-        css=_CSS,
-        theme=gr.themes.Soft(primary_hue="blue"),
-    ) as demo:
+    with gr.Blocks(title="PubMed RAG — Oncology Evidence Search") as demo:
         gr.Markdown(
             """
 # PubMed RAG — Oncology Evidence Search
@@ -157,7 +153,6 @@ Each answer cites the specific PubMed abstracts it was generated from.
                 label="Answer",
                 value="",
                 elem_id="answer-box",
-                show_label=True,
             )
 
         gr.Markdown("### Sources")
