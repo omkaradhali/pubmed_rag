@@ -120,10 +120,12 @@ def build_demo() -> gr.Blocks:
         gr.Markdown(
             """
 # PubMed RAG — Oncology Evidence Search
-**RAG-powered clinical question answering over 35M+ PubMed oncology abstracts.**
+**RAG-powered clinical question answering over 4,992 curated PubMed oncology abstracts.**
 
 Ask any oncology question to get a cited, LLM-synthesised evidence summary.
-Each answer cites the specific PubMed abstracts it was generated from.
+Each answer cites the specific PubMed abstracts it was retrieved from.
+The corpus is a semantic index of recent oncology literature; the same architecture
+scales to the full PubMed catalog with a corpus re-seed.
             """
         )
 
@@ -164,7 +166,7 @@ Each answer cites the specific PubMed abstracts it was generated from.
         gr.Markdown(
             """
 ---
-**pubmed_rag** · Faithfulness 0.91 (RAGAS) · Recall@20 0.970 (N=97 labeled questions)
+**pubmed_rag** · 4,992 oncology abstracts · Faithfulness 0.91 (RAGAS) · Recall@20 0.97 (N=97)
 [GitHub](https://github.com/omkaradhali/pubmed_rag) · FastAPI + ChromaDB + Anthropic Claude
 CDS Hooks endpoint: `/cds-services/pubmed-rag`
             """,
