@@ -66,17 +66,18 @@ _CSS = """
     font-weight: 600;
 }
 
-/* ── Section header ──────────────────────────────────────── */
-.sec-head {
-    font-size: 0.72rem !important;
-    font-weight: 700 !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.08em !important;
-    color: #374151 !important;
-    margin: 0 0 10px 0 !important;
-    padding-bottom: 8px !important;
-    border-bottom: 1px solid #d1d5db !important;
+/* ── Answer card — force all text dark regardless of theme ── */
+#answer-panel,
+#answer-panel *,
+#answer-panel p,
+#answer-panel li,
+#answer-panel h1,
+#answer-panel h2,
+#answer-panel h3,
+#answer-panel span {
+    color: #1f2937 !important;
 }
+#answer-panel strong, #answer-panel b { color: #111827 !important; }
 
 /* ── Query input ─────────────────────────────────────────── */
 #query-input textarea {
@@ -150,14 +151,9 @@ _CSS = """
     background: #f8faff !important;
     padding: 16px 20px !important;
     min-height: 80px !important;
-}
-#answer-panel p {
     font-size: 0.97rem !important;
     line-height: 1.78 !important;
-    color: #1f2937 !important;
-    margin-bottom: 10px !important;
 }
-#answer-panel strong { color: #111827 !important; }
 
 /* ── Confidence row ──────────────────────────────────────── */
 .conf-pill {
@@ -270,6 +266,12 @@ _CSS = """
 .app-footer a:hover { color: #6b7280; }
 """
 
+_SEC_STYLE = (
+    "font-size:0.71rem;font-weight:700;text-transform:uppercase;"
+    "letter-spacing:0.09em;color:#374151;margin:0 0 10px 0;"
+    "padding-bottom:8px;border-bottom:1.5px solid #d1d5db;"
+)
+
 _BANNER = """
 <div class="pubmed-banner">
   <h1>🔬 PubMed RAG &mdash; Oncology Evidence Search</h1>
@@ -293,11 +295,15 @@ _FOOTER = """
 </div>
 """
 
+_PH_STYLE = (
+    "text-align:center;color:#9ca3af;font-size:0.86rem;"
+    "padding:20px 0;line-height:1.6;"
+)
 _ANSWER_PLACEHOLDER = (
-    "<div class='placeholder'>Ask a question above to see the evidence summary here.</div>"
+    f"<div style='{_PH_STYLE}'>Ask a question above to see the evidence summary here.</div>"
 )
 _SOURCES_PLACEHOLDER = (
-    "<div class='placeholder'>Retrieved PubMed abstracts will appear here "
+    f"<div style='{_PH_STYLE}'>Retrieved PubMed abstracts will appear here "
     "with title, journal, year, and links.</div>"
 )
 
@@ -307,17 +313,27 @@ _SOURCES_PLACEHOLDER = (
 
 def _build_confidence(tier: str, coverage_note: str | None) -> str:
     icons = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
-    cls = {
-        "High": "conf-high",
-        "Medium": "conf-medium",
-        "Low": "conf-low",
-    }.get(tier, "conf-unknown")
+    colors = {
+        "High":   ("bg:#f0fdf4", "#16a34a", "#bbf7d0"),
+        "Medium": ("bg:#fffbeb", "#d97706", "#fde68a"),
+        "Low":    ("bg:#fef2f2", "#dc2626", "#fecaca"),
+    }.get(tier, ("bg:#f9fafb", "#6b7280", "#e5e7eb"))
+    bg, fg, border = colors[0].split(":")[1], colors[1], colors[2]
     icon = icons.get(tier, "⚪")
-    pill = (
-        f'<div><span class="conf-pill {cls}">{icon} Retrieval confidence: {tier}</span>'
+    style = (
+        f"display:inline-flex;align-items:center;gap:6px;"
+        f"padding:5px 12px;border-radius:20px;font-size:0.78rem;"
+        f"font-weight:600;margin-top:10px;background:{bg};"
+        f"color:{fg};border:1px solid {border};"
     )
+    pill = f'<div><span style="{style}">{icon} Retrieval confidence: {tier}</span>'
     if coverage_note:
-        pill += f'<div class="coverage-note">⚠️ {coverage_note}</div>'
+        warn = (
+            "margin-top:8px;padding:8px 12px;background:#fffbeb;"
+            "border:1px solid #fde68a;border-radius:6px;"
+            "font-size:0.8rem;color:#92400e;"
+        )
+        pill += f'<div style="{warn}">⚠️ {coverage_note}</div>'
     return pill + "</div>"
 
 
@@ -326,9 +342,12 @@ def _build_sources(sources: list[dict]) -> str:
         return "<div class='placeholder'>No sources retrieved.</div>"
 
     n = len(sources)
-    header = (
-        f'<p class="sec-head">{n} Reference{"s" if n != 1 else ""} Retrieved</p>'
+    sec = (
+        "font-size:0.71rem;font-weight:700;text-transform:uppercase;"
+        "letter-spacing:0.09em;color:#374151;margin:0 0 10px 0;"
+        "padding-bottom:8px;border-bottom:1.5px solid #d1d5db;"
     )
+    header = f'<p style="{sec}">{n} Reference{"s" if n != 1 else ""} Retrieved</p>'
     cards = []
     for src in sources:
         num = src.get("number", "?")
@@ -343,17 +362,22 @@ def _build_sources(sources: list[dict]) -> str:
         meta_parts = [p for p in [journal, year, f"PMID {pmid}" if pmid else ""] if p]
         meta = " · ".join(meta_parts)
         doi_link = (
-            f'<a class="ref-link" href="{doi_url}" target="_blank">DOI ↗</a>'
+            f'<a class="ref-link" href="{doi_url}" target="_blank"'
+            ' style="color:#2563eb">DOI ↗</a>'
             if doi_url else ""
         )
         cards.append(f"""
 <div class="ref-card">
   <div class="ref-num">{num}</div>
   <div class="ref-body">
-    <div class="ref-title">{title}</div>
-    <div class="ref-meta">{meta}</div>
-    <span class="ref-score">score {score:.2f}</span>
-    <a class="ref-link" href="{pubmed_url}" target="_blank">PubMed ↗</a>
+    <div class="ref-title" style="color:#111827;font-weight:600;font-size:0.89rem;
+         line-height:1.4;margin-bottom:4px">{title}</div>
+    <div class="ref-meta" style="color:#6b7280;font-size:0.78rem;margin-bottom:7px"
+         >{meta}</div>
+    <span class="ref-score" style="color:#9ca3af;font-size:0.72rem;float:right;
+          margin-top:2px">score {score:.2f}</span>
+    <a class="ref-link" href="{pubmed_url}" target="_blank"
+       style="color:#2563eb">PubMed ↗</a>
     {doi_link}
   </div>
 </div>""")
@@ -414,7 +438,7 @@ def build_demo() -> gr.Blocks:
 
         # ── Ask a question ─────────────────────────────────────
         with gr.Group():
-            gr.HTML('<p class="sec-head">Clinical Question</p>')
+            gr.HTML(f'<p style="{_SEC_STYLE}">Clinical Question</p>')
             query_box = gr.Textbox(
                 label="",
                 show_label=False,
@@ -440,7 +464,7 @@ def build_demo() -> gr.Blocks:
                 )
 
         with gr.Group():
-            gr.HTML('<p class="sec-head">Suggested Questions</p>')
+            gr.HTML(f'<p style="{_SEC_STYLE}">Suggested Questions</p>')
             with gr.Row(elem_classes="chips-row"):
                 chips = [
                     gr.Button(q, elem_classes="q-chip", size="sm")
@@ -449,7 +473,7 @@ def build_demo() -> gr.Blocks:
 
         # ── Evidence summary ───────────────────────────────────
         with gr.Group():
-            gr.HTML('<p class="sec-head">Evidence Summary</p>')
+            gr.HTML(f'<p style="{_SEC_STYLE}">Evidence Summary</p>')
             answer_box = gr.Markdown(
                 value=_ANSWER_PLACEHOLDER,
                 elem_id="answer-panel",
