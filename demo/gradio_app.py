@@ -2,11 +2,9 @@
 gradio_app.py — Gradio demo UI for pubmed_rag.
 
 Calls the running FastAPI backend at API_BASE_URL (default: http://localhost:8001).
-Run this separately from the API — it is a thin HTTP client, not the pipeline itself.
 
 Usage:
   pip install gradio httpx
-  python demo/gradio_app.py                              # http://localhost:7860
   API_BASE_URL=http://100.99.96.88:8011 python demo/gradio_app.py
 """
 
@@ -23,389 +21,311 @@ _TIMEOUT = 60
 _EXAMPLE_QUERIES = [
     "What is the first-line treatment for HER2-positive metastatic breast cancer?",
     "How does PD-1/PD-L1 checkpoint inhibition restore anti-tumor immunity?",
-    "What biomarkers predict response to immune checkpoint inhibitors in solid tumors?",
+    "What biomarkers predict response to immune checkpoint inhibitors?",
     "What is the 5-year survival rate for stage III colorectal cancer?",
     "How are PARP inhibitors used in ovarian cancer treatment?",
 ]
 
-# ── CSS design system ─────────────────────────────────────────────────────────
-
 _CSS = """
-/* ── Global ────────────────────────────────────────────────── */
+/* ── Global ─────────────────────────────────────────────── */
 .gradio-container {
-    max-width: 880px !important;
+    max-width: 860px !important;
     margin: 0 auto !important;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    background: #f3f4f6 !important;
-    padding-bottom: 32px !important;
 }
-body, .dark { background: #f3f4f6 !important; }
 
-/* ── Header ─────────────────────────────────────────────────── */
-.app-header {
+/* ── Banner ──────────────────────────────────────────────── */
+.pubmed-banner {
     background: linear-gradient(135deg, #0f4c81 0%, #1565c0 60%, #1a73b8 100%);
-    border-radius: 14px;
-    padding: 30px 34px 24px;
-    margin-bottom: 6px;
-    box-shadow: 0 4px 20px rgba(15, 76, 129, 0.25);
+    border-radius: 12px;
+    padding: 26px 30px 22px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 16px rgba(15, 76, 129, 0.2);
 }
-.app-header h1 {
-    font-size: 1.65rem !important;
+.pubmed-banner h1 {
+    font-size: 1.55rem !important;
     font-weight: 700 !important;
     color: white !important;
     margin: 0 0 6px 0 !important;
-    letter-spacing: -0.025em;
-    line-height: 1.2;
+    letter-spacing: -0.02em;
 }
-.app-header .subtitle {
-    font-size: 0.93rem;
-    color: rgba(255,255,255,0.88);
-    line-height: 1.55;
-    margin-bottom: 16px;
+.pubmed-banner p {
+    color: rgba(255,255,255,0.88) !important;
+    font-size: 0.9rem;
+    margin: 0 0 14px 0;
+    line-height: 1.5;
 }
-.badge-row { display: flex; flex-wrap: wrap; gap: 7px; }
-.hdr-badge {
-    display: inline-block;
-    background: rgba(255,255,255,0.16);
+.banner-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.b-badge {
+    background: rgba(255,255,255,0.15);
     border: 1px solid rgba(255,255,255,0.3);
     color: white;
     border-radius: 20px;
-    padding: 4px 13px;
-    font-size: 0.74rem;
+    padding: 3px 11px;
+    font-size: 0.72rem;
     font-weight: 600;
-    letter-spacing: 0.01em;
 }
 
-/* ── Section cards ──────────────────────────────────────────── */
-.section-card {
-    background: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    padding: 22px 24px;
-    margin-top: 14px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-}
-.section-label {
-    font-size: 0.68rem !important;
+/* ── Section header ──────────────────────────────────────── */
+.sec-head {
+    font-size: 0.72rem !important;
     font-weight: 700 !important;
-    letter-spacing: 0.1em !important;
     text-transform: uppercase !important;
-    color: #9ca3af !important;
-    margin-bottom: 14px !important;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.section-label::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: #f3f4f6;
+    letter-spacing: 0.08em !important;
+    color: #6b7280 !important;
+    margin: 0 0 10px 0 !important;
+    padding-bottom: 8px !important;
+    border-bottom: 1px solid #e5e7eb !important;
 }
 
-/* ── Query input ────────────────────────────────────────────── */
+/* ── Example questions ───────────────────────────────────── */
+.examples-wrap { margin-top: 12px; }
+.examples-wrap .label { display: none; }
+.dataset tbody tr {
+    background: #f9fafb !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    transition: background 0.12s !important;
+}
+.dataset tbody tr:hover { background: #eff6ff !important; }
+.dataset tbody tr td {
+    color: #374151 !important;
+    font-size: 0.84rem !important;
+    padding: 8px 12px !important;
+    border: none !important;
+}
+.dataset thead { display: none !important; }
+.dataset {
+    border: 1px solid #e5e7eb !important;
+    border-radius: 8px !important;
+    overflow: hidden !important;
+}
+
+/* ── Query input ─────────────────────────────────────────── */
+#query-input label span { font-weight: 600 !important; color: #374151 !important; }
 #query-input textarea {
-    font-size: 0.97rem !important;
+    font-size: 0.96rem !important;
     line-height: 1.6 !important;
     border: 1.5px solid #d1d5db !important;
     border-radius: 8px !important;
-    padding: 12px 14px !important;
-    background: #fafafa !important;
     color: #111827 !important;
-    resize: vertical !important;
-    transition: border-color 0.15s, box-shadow 0.15s !important;
+    transition: border-color 0.15s !important;
 }
 #query-input textarea:focus {
     border-color: #2563eb !important;
     box-shadow: 0 0 0 3px rgba(37,99,235,0.1) !important;
-    background: white !important;
-    outline: none !important;
-}
-#query-input label span {
-    font-size: 0.82rem !important;
-    font-weight: 600 !important;
-    color: #374151 !important;
 }
 
-/* ── Buttons ────────────────────────────────────────────────── */
+/* ── Buttons ─────────────────────────────────────────────── */
 #ask-btn button {
-    background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+    background: #2563eb !important;
     color: white !important;
-    font-weight: 700 !important;
-    font-size: 0.95rem !important;
+    font-weight: 600 !important;
     border-radius: 8px !important;
     border: none !important;
-    height: 46px !important;
-    letter-spacing: 0.01em !important;
-    box-shadow: 0 2px 8px rgba(37,99,235,0.3) !important;
-    transition: all 0.15s !important;
+    height: 44px !important;
+    font-size: 0.92rem !important;
 }
-#ask-btn button:hover {
-    background: linear-gradient(135deg, #1d4ed8, #1e40af) !important;
-    box-shadow: 0 4px 12px rgba(37,99,235,0.4) !important;
-    transform: translateY(-1px) !important;
-}
+#ask-btn button:hover { background: #1d4ed8 !important; }
 #clear-btn button {
-    font-weight: 500 !important;
-    font-size: 0.9rem !important;
     border-radius: 8px !important;
-    height: 46px !important;
-    color: #6b7280 !important;
-    border: 1.5px solid #e5e7eb !important;
+    height: 44px !important;
+    border: 1.5px solid #d1d5db !important;
     background: white !important;
-    transition: all 0.15s !important;
-}
-#clear-btn button:hover {
-    border-color: #d1d5db !important;
-    color: #374151 !important;
-    background: #f9fafb !important;
+    color: #6b7280 !important;
+    font-size: 0.88rem !important;
 }
 
-/* ── Answer panel ───────────────────────────────────────────── */
+/* ── Answer card ─────────────────────────────────────────── */
 #answer-panel {
     border-left: 4px solid #2563eb !important;
     border-radius: 0 8px 8px 0 !important;
     background: #f8faff !important;
-    padding: 18px 22px !important;
-    margin: 0 !important;
+    padding: 16px 20px !important;
+    min-height: 80px !important;
 }
-#answer-panel .prose p,
 #answer-panel p {
     font-size: 0.97rem !important;
-    line-height: 1.8 !important;
+    line-height: 1.78 !important;
     color: #1f2937 !important;
     margin-bottom: 10px !important;
 }
-#answer-panel .prose strong,
 #answer-panel strong { color: #111827 !important; }
 
-/* ── Source cards ───────────────────────────────────────────── */
-.src-cards-wrap { display: flex; flex-direction: column; gap: 10px; }
-.src-card {
+/* ── Confidence row ──────────────────────────────────────── */
+.conf-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-top: 10px;
+}
+.conf-high   { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.conf-medium { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+.conf-low    { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.conf-unknown{ background: #f9fafb; color: #6b7280; border: 1px solid #e5e7eb; }
+.coverage-note {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: #92400e;
+}
+
+/* ── Source cards ────────────────────────────────────────── */
+.ref-card {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
     background: white;
     border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 14px 16px;
-    display: flex;
-    gap: 13px;
-    align-items: flex-start;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    border-radius: 8px;
+    padding: 13px 15px;
+    margin-bottom: 8px;
+    transition: border-color 0.12s;
 }
-.src-card:hover {
-    border-color: #93c5fd;
-    box-shadow: 0 3px 10px rgba(37,99,235,0.09);
-}
-.src-num {
+.ref-card:hover { border-color: #93c5fd; }
+.ref-num {
+    min-width: 26px;
+    height: 26px;
+    border-radius: 50%;
     background: #2563eb;
     color: white;
-    border-radius: 50%;
-    min-width: 28px;
-    height: 28px;
-    font-size: 0.74rem;
+    font-size: 0.73rem;
     font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     margin-top: 1px;
-    box-shadow: 0 2px 4px rgba(37,99,235,0.25);
 }
-.src-body { flex: 1; min-width: 0; }
-.src-title {
-    font-size: 0.9rem;
+.ref-body { flex: 1; }
+.ref-title {
     font-weight: 600;
+    font-size: 0.89rem;
     color: #111827;
-    line-height: 1.45;
-    margin-bottom: 5px;
+    line-height: 1.4;
+    margin-bottom: 4px;
 }
-.src-meta {
-    font-size: 0.79rem;
-    color: #9ca3af;
-    margin-bottom: 9px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-.src-meta-sep { color: #d1d5db; }
-.src-links { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
-.src-link {
+.ref-meta { font-size: 0.78rem; color: #9ca3af; margin-bottom: 7px; }
+.ref-link {
     display: inline-block;
     background: #eff6ff;
     color: #2563eb;
     border: 1px solid #bfdbfe;
-    border-radius: 6px;
-    padding: 3px 10px;
-    font-size: 0.74rem;
+    border-radius: 5px;
+    padding: 2px 9px;
+    font-size: 0.73rem;
     font-weight: 600;
     text-decoration: none;
-    transition: background 0.12s;
-    cursor: pointer;
+    margin-right: 5px;
 }
-.src-link:hover { background: #dbeafe; }
-.src-score {
+.ref-link:hover { background: #dbeafe; }
+.ref-score {
     font-size: 0.72rem;
-    font-weight: 600;
-    color: #6b7280;
-    margin-left: auto;
-    white-space: nowrap;
-    padding: 2px 8px;
-    background: #f9fafb;
-    border: 1px solid #f3f4f6;
-    border-radius: 20px;
-}
-
-/* ── Confidence row ─────────────────────────────────────────── */
-.conf-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    background: #f9fafb;
-    border: 1px solid #f3f4f6;
-    border-radius: 8px;
-    font-size: 0.82rem;
-    color: #6b7280;
-    margin-top: 12px;
-}
-.conf-dot {
-    width: 9px; height: 9px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-.conf-high  { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
-.conf-medium{ background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.2); }
-.conf-low   { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.2); }
-.conf-none  { background: #9ca3af; }
-.conf-label { font-weight: 600; color: #374151; }
-.coverage-warn {
-    margin-top: 6px;
-    padding: 8px 12px;
-    background: #fffbeb;
-    border: 1px solid #fde68a;
-    border-radius: 7px;
-    font-size: 0.8rem;
-    color: #92400e;
-}
-
-/* ── Empty / error states ───────────────────────────────────── */
-.empty-state {
-    text-align: center;
-    padding: 32px 20px;
     color: #9ca3af;
-    font-size: 0.88rem;
+    float: right;
+    margin-top: 2px;
+}
+
+/* ── Empty / error states ────────────────────────────────── */
+.placeholder {
+    text-align: center;
+    color: #9ca3af;
+    font-size: 0.86rem;
+    padding: 20px 0;
     line-height: 1.6;
 }
-.empty-icon { font-size: 2rem; margin-bottom: 10px; }
-.error-state {
-    padding: 14px 16px;
+.err-box {
+    padding: 12px 14px;
     background: #fef2f2;
     border: 1px solid #fecaca;
-    border-radius: 8px;
+    border-radius: 7px;
     color: #991b1b;
-    font-size: 0.87rem;
-    font-weight: 500;
+    font-size: 0.86rem;
 }
 
-/* ── Footer ─────────────────────────────────────────────────── */
+/* ── Footer ──────────────────────────────────────────────── */
 .app-footer {
     text-align: center;
-    font-size: 0.76rem;
+    font-size: 0.74rem;
     color: #9ca3af;
-    padding: 20px 0 6px;
-    margin-top: 8px;
+    margin-top: 6px;
+    padding-top: 14px;
+    border-top: 1px solid #f3f4f6;
 }
 .app-footer a { color: #9ca3af; text-decoration: none; }
 .app-footer a:hover { color: #6b7280; }
-.app-footer code {
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
-    border-radius: 4px;
-    padding: 1px 6px;
-    font-size: 0.72rem;
-    color: #374151;
-}
 """
 
-# ── Static HTML fragments ─────────────────────────────────────────────────────
-
-_HEADER = """
-<div class="app-header">
-  <h1>🔬 PubMed RAG — Oncology Evidence Search</h1>
-  <div class="subtitle">
-    RAG-powered clinical question answering over a curated corpus of PubMed oncology
-    abstracts. Every answer is grounded in retrieved literature — no hallucinated sources.
+_BANNER = """
+<div class="pubmed-banner">
+  <h1>🔬 PubMed RAG &mdash; Oncology Evidence Search</h1>
+  <p>RAG-powered clinical question answering over 4,992 curated PubMed oncology abstracts.
+  Every answer is grounded in retrieved literature with inline citations.</p>
+  <div class="banner-badges">
+    <span class="b-badge">📄 4,992 abstracts</span>
+    <span class="b-badge">✅ Faithfulness 0.91</span>
+    <span class="b-badge">🎯 Recall@20 0.97</span>
+    <span class="b-badge">🔗 HL7 CDS Hooks</span>
   </div>
-  <div class="badge-row">
-    <span class="hdr-badge">📄 4,992 oncology abstracts</span>
-    <span class="hdr-badge">✅ Faithfulness 0.91 (RAGAS)</span>
-    <span class="hdr-badge">🎯 Recall@20 0.97</span>
-    <span class="hdr-badge">🔗 HL7 CDS Hooks compatible</span>
-  </div>
-</div>
-"""
-
-_ANSWER_EMPTY = """
-<div class="empty-state">
-  <div class="empty-icon">💬</div>
-  Ask a clinical question above to see a cited evidence summary here.
-</div>
-"""
-
-_SOURCES_EMPTY = """
-<div class="empty-state">
-  <div class="empty-icon">📚</div>
-  Retrieved PubMed sources will appear here, each with title, journal, year,
-  relevance score, and a direct link to the abstract.
 </div>
 """
 
 _FOOTER = """
 <div class="app-footer">
-  <a href="https://github.com/omkaradhali/pubmed_rag" target="_blank">GitHub</a>
-  &nbsp;·&nbsp; FastAPI + ChromaDB + Anthropic Claude
-  &nbsp;·&nbsp; CDS Hooks: <code>/cds-services/pubmed-rag</code>
+  <a href="https://github.com/omkaradhali/pubmed_rag" target="_blank">GitHub</a> ·
+  FastAPI + ChromaDB + Anthropic Claude ·
+  CDS Hooks: <code style="background:#f3f4f6;border:1px solid #e5e7eb;
+  border-radius:4px;padding:1px 5px;font-size:0.7rem">/cds-services/pubmed-rag</code>
 </div>
 """
 
+_ANSWER_PLACEHOLDER = (
+    "<div class='placeholder'>Ask a question above to see the evidence summary here.</div>"
+)
+_SOURCES_PLACEHOLDER = (
+    "<div class='placeholder'>Retrieved PubMed abstracts will appear here "
+    "with title, journal, year, and links.</div>"
+)
 
-# ── Data helpers ──────────────────────────────────────────────────────────────
+
+# ── Result builders ───────────────────────────────────────────────────────────
 
 
-def _confidence_html(tier: str, coverage_note: str | None) -> str:
-    dot_class = {
+def _build_confidence(tier: str, coverage_note: str | None) -> str:
+    icons = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
+    cls = {
         "High": "conf-high",
         "Medium": "conf-medium",
         "Low": "conf-low",
-    }.get(tier, "conf-none")
-    label = tier or "Unknown"
-    warn = (
-        f'<div class="coverage-warn">⚠️ {coverage_note}</div>'
-        if coverage_note
-        else ""
+    }.get(tier, "conf-unknown")
+    icon = icons.get(tier, "⚪")
+    pill = (
+        f'<div><span class="conf-pill {cls}">{icon} Retrieval confidence: {tier}</span>'
     )
-    return f"""
-<div>
-  <div class="conf-row">
-    <span class="conf-dot {dot_class}"></span>
-    <span>Retrieval confidence: <span class="conf-label">{label}</span></span>
-  </div>
-  {warn}
-</div>
-"""
+    if coverage_note:
+        pill += f'<div class="coverage-note">⚠️ {coverage_note}</div>'
+    return pill + "</div>"
 
 
-def _sources_html(sources: list[dict]) -> str:
+def _build_sources(sources: list[dict]) -> str:
     if not sources:
-        return (
-            '<div class="empty-state"><div class="empty-icon">🔍</div>'
-            "No sources retrieved.</div>"
-        )
+        return "<div class='placeholder'>No sources retrieved.</div>"
 
-    count = len(sources)
+    n = len(sources)
+    header = (
+        f'<p class="sec-head">{n} Reference{"s" if n != 1 else ""} Retrieved</p>'
+    )
     cards = []
     for src in sources:
         num = src.get("number", "?")
-        title = src.get("title", "Unknown title")
+        title = src.get("title", "Untitled")
         journal = src.get("journal", "")
         year = src.get("year", "")
         pmid = src.get("pmid", "")
@@ -413,79 +333,58 @@ def _sources_html(sources: list[dict]) -> str:
         doi_url = src.get("doi_url", "")
         score = src.get("score", 0.0)
 
-        meta_parts = []
-        if journal:
-            meta_parts.append(f'<span>{journal}</span>')
-        if year:
-            sep = '<span class="src-meta-sep">·</span>' if meta_parts else ""
-            meta_parts.append(f'{sep}<span>{year}</span>')
-        if pmid:
-            sep = '<span class="src-meta-sep">·</span>' if meta_parts else ""
-            meta_parts.append(f'{sep}<span>PMID {pmid}</span>')
-        meta_html = " ".join(meta_parts)
-
+        meta_parts = [p for p in [journal, year, f"PMID {pmid}" if pmid else ""] if p]
+        meta = " · ".join(meta_parts)
         doi_link = (
-            f'<a class="src-link" href="{doi_url}" target="_blank">DOI ↗</a>'
+            f'<a class="ref-link" href="{doi_url}" target="_blank">DOI ↗</a>'
             if doi_url else ""
         )
-
         cards.append(f"""
-<div class="src-card">
-  <div class="src-num">{num}</div>
-  <div class="src-body">
-    <div class="src-title">{title}</div>
-    <div class="src-meta">{meta_html}</div>
-    <div class="src-links">
-      <a class="src-link" href="{pubmed_url}" target="_blank">PubMed ↗</a>
-      {doi_link}
-      <span class="src-score">score {score:.2f}</span>
-    </div>
+<div class="ref-card">
+  <div class="ref-num">{num}</div>
+  <div class="ref-body">
+    <div class="ref-title">{title}</div>
+    <div class="ref-meta">{meta}</div>
+    <span class="ref-score">score {score:.2f}</span>
+    <a class="ref-link" href="{pubmed_url}" target="_blank">PubMed ↗</a>
+    {doi_link}
   </div>
 </div>""")
 
-    cards_html = "\n".join(cards)
-    return f"""
-<div>
-  <div class="section-label">{count} Reference{"s" if count != 1 else ""} Retrieved</div>
-  <div class="src-cards-wrap">{cards_html}</div>
-</div>
-"""
+    return header + "\n".join(cards)
 
 
-# ── Main query function ───────────────────────────────────────────────────────
+# ── Query handler ─────────────────────────────────────────────────────────────
 
 
 def ask_pubmed(query: str) -> tuple[str, str, str]:
     """Return (answer_markdown, confidence_html, sources_html)."""
     if not query.strip():
-        return "", _ANSWER_EMPTY, _SOURCES_EMPTY
+        return "", _ANSWER_PLACEHOLDER, _SOURCES_PLACEHOLDER
 
     try:
-        response = httpx.post(
+        resp = httpx.post(
             f"{_API_BASE}/ask",
             json={"query": query.strip(), "mode": "incremental", "n_results": 5},
             timeout=_TIMEOUT,
         )
-        response.raise_for_status()
+        resp.raise_for_status()
     except httpx.TimeoutException:
-        err = (
-            '<div class="error-state">⏱ Request timed out — the pipeline may be '
-            "loading models. Try again in a few seconds.</div>"
-        )
-        return "", err, _SOURCES_EMPTY
+        err = "<div class='err-box'>⏱ Request timed out — try again in a few seconds.</div>"
+        return "", err, _SOURCES_PLACEHOLDER
     except httpx.HTTPStatusError as e:
         code = e.response.status_code
-        detail = e.response.text[:180]
-        err = f'<div class="error-state">⚠️ API error {code}: {detail}</div>'
-        return "", err, _SOURCES_EMPTY
+        msg = e.response.text[:200]
+        err = f"<div class='err-box'>⚠️ API error {code}: {msg}</div>"
+        return "", err, _SOURCES_PLACEHOLDER
     except httpx.ConnectError:
         err = (
-            f'<div class="error-state">🔌 Could not connect to {_API_BASE}. '
-            "Is the FastAPI server running?</div>"
+            f"<div class='err-box'>🔌 Cannot connect to {_API_BASE} "
+            "— is the FastAPI server running?</div>"
         )
-        return "", err, _SOURCES_EMPTY
+        return "", err, _SOURCES_PLACEHOLDER
 
-    data = response.json()
+    data = resp.json()
     answer = data.get("answer", "No answer returned.")
     sources = data.get("sources", [])
     confidence = data.get("confidence_tier", "")
@@ -493,23 +392,22 @@ def ask_pubmed(query: str) -> tuple[str, str, str]:
 
     return (
         answer,
-        _confidence_html(confidence, coverage_note),
-        _sources_html(sources),
+        _build_confidence(confidence, coverage_note),
+        _build_sources(sources),
     )
 
 
-# ── UI layout ─────────────────────────────────────────────────────────────────
+# ── Layout ────────────────────────────────────────────────────────────────────
 
 
 def build_demo() -> gr.Blocks:
     with gr.Blocks(title="PubMed RAG — Oncology Evidence Search") as demo:
 
-        # Header
-        gr.HTML(_HEADER)
+        gr.HTML(_BANNER)
 
-        # ── Query section ──────────────────────────────────────
-        with gr.Group(elem_classes="section-card"):
-            gr.HTML('<div class="section-label">Clinical Question</div>')
+        # ── Ask a question ─────────────────────────────────────
+        with gr.Group():
+            gr.HTML('<p class="sec-head">Clinical Question</p>')
             query_box = gr.Textbox(
                 label="",
                 placeholder=(
@@ -528,34 +426,35 @@ def build_demo() -> gr.Blocks:
                     elem_id="ask-btn",
                 )
                 clear_btn = gr.Button(
-                    "✕  Clear",
+                    "Clear",
                     scale=1,
                     elem_id="clear-btn",
                 )
 
-        gr.Examples(
-            examples=_EXAMPLE_QUERIES,
-            inputs=query_box,
-            label="Example clinical questions",
-        )
+        with gr.Group(elem_classes="examples-wrap"):
+            gr.HTML('<p class="sec-head">Suggested Questions</p>')
+            gr.Examples(
+                examples=_EXAMPLE_QUERIES,
+                inputs=query_box,
+                label="",
+            )
 
-        # ── Answer section ─────────────────────────────────────
-        with gr.Group(elem_classes="section-card"):
-            gr.HTML('<div class="section-label">Evidence Summary</div>')
+        # ── Evidence summary ───────────────────────────────────
+        with gr.Group():
+            gr.HTML('<p class="sec-head">Evidence Summary</p>')
             answer_box = gr.Markdown(
-                value=_ANSWER_EMPTY,
+                value=_ANSWER_PLACEHOLDER,
                 elem_id="answer-panel",
             )
             confidence_box = gr.HTML(value="")
 
-        # ── Sources section ────────────────────────────────────
-        with gr.Group(elem_classes="section-card"):
-            sources_box = gr.HTML(value=_SOURCES_EMPTY)
+        # ── References ─────────────────────────────────────────
+        with gr.Group():
+            sources_box = gr.HTML(value=_SOURCES_PLACEHOLDER)
 
-        # Footer
         gr.HTML(_FOOTER)
 
-        # ── Event wiring ───────────────────────────────────────
+        # ── Wiring ─────────────────────────────────────────────
         outputs = [answer_box, confidence_box, sources_box]
 
         submit_btn.click(
@@ -571,7 +470,7 @@ def build_demo() -> gr.Blocks:
             show_progress="minimal",
         )
         clear_btn.click(
-            fn=lambda: ("", "", _ANSWER_EMPTY, _SOURCES_EMPTY),
+            fn=lambda: ("", _ANSWER_PLACEHOLDER, "", _SOURCES_PLACEHOLDER),
             inputs=[],
             outputs=[query_box] + outputs,
         )
