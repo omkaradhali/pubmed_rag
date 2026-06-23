@@ -78,42 +78,49 @@ _CSS = """
     border-bottom: 1px solid #e5e7eb !important;
 }
 
-/* ── Example questions ───────────────────────────────────── */
-.examples-wrap { margin-top: 12px; }
-.examples-wrap .label { display: none; }
-.dataset tbody tr {
-    background: #f9fafb !important;
-    border-radius: 6px !important;
-    cursor: pointer !important;
-    transition: background 0.12s !important;
-}
-.dataset tbody tr:hover { background: #eff6ff !important; }
-.dataset tbody tr td {
-    color: #374151 !important;
-    font-size: 0.84rem !important;
-    padding: 8px 12px !important;
-    border: none !important;
-}
-.dataset thead { display: none !important; }
-.dataset {
-    border: 1px solid #e5e7eb !important;
-    border-radius: 8px !important;
-    overflow: hidden !important;
-}
-
 /* ── Query input ─────────────────────────────────────────── */
-#query-input label span { font-weight: 600 !important; color: #374151 !important; }
 #query-input textarea {
     font-size: 0.96rem !important;
     line-height: 1.6 !important;
+    background: #ffffff !important;
+    color: #1f2937 !important;
     border: 1.5px solid #d1d5db !important;
     border-radius: 8px !important;
-    color: #111827 !important;
     transition: border-color 0.15s !important;
 }
+#query-input textarea::placeholder { color: #9ca3af !important; }
 #query-input textarea:focus {
     border-color: #2563eb !important;
     box-shadow: 0 0 0 3px rgba(37,99,235,0.1) !important;
+    outline: none !important;
+}
+
+/* ── Suggested question chips ────────────────────────────── */
+.chips-row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 2px 0 !important;
+}
+.q-chip button {
+    background: #eff6ff !important;
+    color: #2563eb !important;
+    border: 1px solid #bfdbfe !important;
+    border-radius: 20px !important;
+    padding: 5px 14px !important;
+    font-size: 0.78rem !important;
+    font-weight: 500 !important;
+    white-space: normal !important;
+    height: auto !important;
+    min-height: unset !important;
+    line-height: 1.4 !important;
+    cursor: pointer !important;
+    transition: background 0.12s, border-color 0.12s !important;
+    box-shadow: none !important;
+}
+.q-chip button:hover {
+    background: #dbeafe !important;
+    border-color: #93c5fd !important;
 }
 
 /* ── Buttons ─────────────────────────────────────────────── */
@@ -410,6 +417,7 @@ def build_demo() -> gr.Blocks:
             gr.HTML('<p class="sec-head">Clinical Question</p>')
             query_box = gr.Textbox(
                 label="",
+                show_label=False,
                 placeholder=(
                     "e.g. What is the first-line treatment for HER2-positive "
                     "metastatic breast cancer?"
@@ -431,13 +439,13 @@ def build_demo() -> gr.Blocks:
                     elem_id="clear-btn",
                 )
 
-        with gr.Group(elem_classes="examples-wrap"):
+        with gr.Group():
             gr.HTML('<p class="sec-head">Suggested Questions</p>')
-            gr.Examples(
-                examples=_EXAMPLE_QUERIES,
-                inputs=query_box,
-                label="",
-            )
+            with gr.Row(elem_classes="chips-row"):
+                chips = [
+                    gr.Button(q, elem_classes="q-chip", size="sm")
+                    for q in _EXAMPLE_QUERIES
+                ]
 
         # ── Evidence summary ───────────────────────────────────
         with gr.Group():
@@ -461,19 +469,27 @@ def build_demo() -> gr.Blocks:
             fn=ask_pubmed,
             inputs=query_box,
             outputs=outputs,
-            show_progress="minimal",
+            show_progress="full",
         )
         query_box.submit(
             fn=ask_pubmed,
             inputs=query_box,
             outputs=outputs,
-            show_progress="minimal",
+            show_progress="full",
         )
         clear_btn.click(
             fn=lambda: ("", _ANSWER_PLACEHOLDER, "", _SOURCES_PLACEHOLDER),
             inputs=[],
             outputs=[query_box] + outputs,
         )
+
+        # Each chip populates the query box with its label text
+        for chip in chips:
+            chip.click(
+                fn=lambda q=chip.value: q,
+                inputs=[],
+                outputs=[query_box],
+            )
 
     return demo
 
