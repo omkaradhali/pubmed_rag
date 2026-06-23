@@ -66,6 +66,21 @@ _CSS = """
     font-weight: 600;
 }
 
+/* ── Section headers (Markdown, targeted by elem_id) ─────── */
+#sec-clinical, #sec-clinical *,
+#sec-suggested, #sec-suggested *,
+#sec-evidence,  #sec-evidence  * {
+    color: #374151 !important;
+    font-size: 0.71rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.09em !important;
+    padding-bottom: 6px !important;
+    border-bottom: 1.5px solid #d1d5db !important;
+    margin-bottom: 10px !important;
+    background: transparent !important;
+}
+
 /* ── Answer card — force all text dark regardless of theme ── */
 #answer-panel,
 #answer-panel *,
@@ -339,15 +354,18 @@ def _build_confidence(tier: str, coverage_note: str | None) -> str:
 
 def _build_sources(sources: list[dict]) -> str:
     if not sources:
-        return "<div class='placeholder'>No sources retrieved.</div>"
+        return (
+            '<div style="background:#fff;text-align:center;color:#9ca3af;'
+            'font-size:0.86rem;padding:20px 0;">No sources retrieved.</div>'
+        )
 
     n = len(sources)
-    sec = (
-        "font-size:0.71rem;font-weight:700;text-transform:uppercase;"
-        "letter-spacing:0.09em;color:#374151;margin:0 0 10px 0;"
-        "padding-bottom:8px;border-bottom:1.5px solid #d1d5db;"
+    header = (
+        f'<div style="background:#ffffff;font-size:0.71rem;font-weight:700;'
+        f'text-transform:uppercase;letter-spacing:0.09em;color:#374151;'
+        f'margin:0 0 10px 0;padding-bottom:8px;border-bottom:1.5px solid #d1d5db;">'
+        f'{n} Reference{"s" if n != 1 else ""} Retrieved</div>'
     )
-    header = f'<p style="{sec}">{n} Reference{"s" if n != 1 else ""} Retrieved</p>'
     cards = []
     for src in sources:
         num = src.get("number", "?")
@@ -438,7 +456,7 @@ def build_demo() -> gr.Blocks:
 
         # ── Ask a question ─────────────────────────────────────
         with gr.Group():
-            gr.HTML(f'<p style="{_SEC_STYLE}">Clinical Question</p>')
+            gr.Markdown("Clinical Question", elem_id="sec-clinical")
             query_box = gr.Textbox(
                 label="",
                 show_label=False,
@@ -464,7 +482,7 @@ def build_demo() -> gr.Blocks:
                 )
 
         with gr.Group():
-            gr.HTML(f'<p style="{_SEC_STYLE}">Suggested Questions</p>')
+            gr.Markdown("Suggested Questions", elem_id="sec-suggested")
             with gr.Row(elem_classes="chips-row"):
                 chips = [
                     gr.Button(q, elem_classes="q-chip", size="sm")
@@ -473,7 +491,7 @@ def build_demo() -> gr.Blocks:
 
         # ── Evidence summary ───────────────────────────────────
         with gr.Group():
-            gr.HTML(f'<p style="{_SEC_STYLE}">Evidence Summary</p>')
+            gr.Markdown("Evidence Summary", elem_id="sec-evidence")
             answer_box = gr.Markdown(
                 value=_ANSWER_PLACEHOLDER,
                 elem_id="answer-panel",
