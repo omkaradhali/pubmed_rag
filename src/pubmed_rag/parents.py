@@ -21,6 +21,7 @@ Public API:
     append_parents(parents, path) — append parents to JSONL (incremental mode)
     load_parents(path)            — load JSONL into the module cache; returns dict
     get_parent(chunk_id)          — fetch a parent by chunk_id (lazy-loads on miss)
+    get_all_parents(path)         — return all parent dicts as a list (for BM25 index)
     clear_cache()                 — reset the module cache (tests, hot reload)
 """
 
@@ -119,6 +120,16 @@ def get_parent(chunk_id: str, path: str | os.PathLike = PARENTS_PATH) -> dict:
     """
     cache = load_parents(path)
     return cache[chunk_id]
+
+
+def get_all_parents(path: str | os.PathLike = PARENTS_PATH) -> list[dict]:
+    """Return all parent dicts as a list, lazy-loading the file on first call.
+
+    Used by retrieve.py to build the BM25 index over all parent texts. Order
+    matches the JSONL file order — stable across calls as long as the cache
+    is warm.
+    """
+    return list(load_parents(path).values())
 
 
 def clear_cache() -> None:
