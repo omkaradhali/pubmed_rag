@@ -58,9 +58,7 @@ def ndcg_at_k(retrieved_pmids: list[str], gold_pmids: list[str], k: int) -> floa
         return 0.0
     gold_set = set(gold_pmids)
     dcg = sum(
-        1.0 / math.log2(i + 2)
-        for i, pmid in enumerate(retrieved_pmids[:k])
-        if pmid in gold_set
+        1.0 / math.log2(i + 2) for i, pmid in enumerate(retrieved_pmids[:k]) if pmid in gold_set
     )
     ideal_hits = min(len(gold_pmids), k)
     ideal_dcg = sum(1.0 / math.log2(i + 2) for i in range(ideal_hits))

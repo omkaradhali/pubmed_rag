@@ -267,13 +267,14 @@ _CSS = """
 .app-footer a:hover { color: #6b7280; }
 """
 
+
 def _sec(label: str) -> str:
     """Dark-background section header with white text — visible regardless of Gradio theme."""
     return (
         f'<div style="background:#1a5276;color:#ffffff;padding:8px 14px;'
-        f'border-radius:7px;font-size:0.68rem;font-weight:700;'
+        f"border-radius:7px;font-size:0.68rem;font-weight:700;"
         f'text-transform:uppercase;letter-spacing:0.1em;margin-bottom:14px;">'
-        f'{label}</div>'
+        f"{label}</div>"
     )
 
 
@@ -300,22 +301,18 @@ _FOOTER = """
 </div>
 """
 
-_PH_STYLE = (
-    "text-align:center;color:#9ca3af;font-size:0.86rem;"
-    "padding:20px 0;line-height:1.6;"
-)
+_PH_STYLE = "text-align:center;color:#9ca3af;font-size:0.86rem;padding:20px 0;line-height:1.6;"
 _ANSWER_PLACEHOLDER = (
     f"<div style='{_PH_STYLE}'>Ask a question above to see the evidence summary here.</div>"
 )
 _REF_HEADER = (
     '<div style="background:#1a5276;color:#ffffff;padding:8px 14px;'
-    'border-radius:7px;font-size:0.68rem;font-weight:700;'
+    "border-radius:7px;font-size:0.68rem;font-weight:700;"
     'text-transform:uppercase;letter-spacing:0.1em;margin-bottom:14px;">'
-    'References</div>'
+    "References</div>"
 )
 _SOURCES_PLACEHOLDER = (
-    _REF_HEADER
-    + f"<div style='{_PH_STYLE}'>Retrieved PubMed abstracts will appear here "
+    _REF_HEADER + f"<div style='{_PH_STYLE}'>Retrieved PubMed abstracts will appear here "
     "with title, journal, year, and links.</div>"
 )
 
@@ -326,9 +323,9 @@ _SOURCES_PLACEHOLDER = (
 def _build_confidence(tier: str, coverage_note: str | None) -> str:
     icons = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
     colors = {
-        "High":   ("bg:#f0fdf4", "#16a34a", "#bbf7d0"),
+        "High": ("bg:#f0fdf4", "#16a34a", "#bbf7d0"),
         "Medium": ("bg:#fffbeb", "#d97706", "#fde68a"),
-        "Low":    ("bg:#fef2f2", "#dc2626", "#fecaca"),
+        "Low": ("bg:#fef2f2", "#dc2626", "#fecaca"),
     }.get(tier, ("bg:#f9fafb", "#6b7280", "#e5e7eb"))
     bg, fg, border = colors[0].split(":")[1], colors[1], colors[2]
     icon = icons.get(tier, "⚪")
@@ -371,9 +368,9 @@ def _build_sources(sources: list[dict]) -> str:
         meta_parts = [p for p in [journal, year, f"PMID {pmid}" if pmid else ""] if p]
         meta = " · ".join(meta_parts)
         doi_link = (
-            f'<a class="ref-link" href="{doi_url}" target="_blank"'
-            ' style="color:#2563eb">DOI ↗</a>'
-            if doi_url else ""
+            f'<a class="ref-link" href="{doi_url}" target="_blank" style="color:#2563eb">DOI ↗</a>'
+            if doi_url
+            else ""
         )
         cards.append(f"""
 <div class="ref-card">
@@ -442,7 +439,6 @@ def ask_pubmed(query: str) -> tuple[str, str, str]:
 
 def build_demo() -> gr.Blocks:
     with gr.Blocks(title="PubMed RAG — Oncology Evidence Search") as demo:
-
         gr.HTML(_BANNER)
 
         # ── Ask a question ─────────────────────────────────────
@@ -475,10 +471,7 @@ def build_demo() -> gr.Blocks:
         with gr.Group():
             gr.HTML(_sec("Suggested Questions"))
             with gr.Row(elem_classes="chips-row"):
-                chips = [
-                    gr.Button(q, elem_classes="q-chip", size="sm")
-                    for q in _EXAMPLE_QUERIES
-                ]
+                chips = [gr.Button(q, elem_classes="q-chip", size="sm") for q in _EXAMPLE_QUERIES]
 
         # ── Evidence summary ───────────────────────────────────
         with gr.Group():

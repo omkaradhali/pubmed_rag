@@ -65,8 +65,8 @@ from pubmed_rag.retrieve import retrieve  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 _logger = logging.getLogger("eval_v0_2")
 
-_RETRIEVAL_N = 20   # top-k to retrieve when computing recall@k / MRR / nDCG
-_RAGAS_N = 5        # top-k passed to the LLM for RAGAS scoring (unchanged)
+_RETRIEVAL_N = 20  # top-k to retrieve when computing recall@k / MRR / nDCG
+_RAGAS_N = 5  # top-k passed to the LLM for RAGAS scoring (unchanged)
 
 
 # ── Question loading ──────────────────────────────────────────────────────────
@@ -136,18 +136,14 @@ def compute_retrieval_metrics(questions: list[dict]) -> dict[str, dict]:
     (their metrics default to 0.0 when merged into the final CSV).
     """
     results: dict[str, dict] = {}
-    answerable = [
-        q for q in questions
-        if q.get("answerable", True) and q.get("gold_pmids")
-    ]
+    answerable = [q for q in questions if q.get("answerable", True) and q.get("gold_pmids")]
     _logger.info(
         "Computing retrieval metrics for %d/%d questions with gold labels...",
-        len(answerable), len(questions),
+        len(answerable),
+        len(questions),
     )
     for i, q in enumerate(answerable):
-        _logger.info(
-            "Retrieval %d/%d: %s", i + 1, len(answerable), q["question"][:60]
-        )
+        _logger.info("Retrieval %d/%d: %s", i + 1, len(answerable), q["question"][:60])
         hits = retrieve(q["question"], n_results=_RETRIEVAL_N)
         retrieved_pmids = [h["pmid"] for h in hits]
         scores = score_question(retrieved_pmids, q["gold_pmids"])
@@ -207,9 +203,7 @@ def print_retrieval_summary(ret_scores: dict[str, dict]) -> None:
         vals = "  ".join(f"{scores.get(m, 0.0):>8.3f}" for m in metric_keys)
         print(f"{q:<{col_w}}  {vals}")
     print(sep)
-    means_str = "  ".join(
-        f"{sum(all_metrics[m]) / len(all_metrics[m]):>8.3f}" for m in metric_keys
-    )
+    means_str = "  ".join(f"{sum(all_metrics[m]) / len(all_metrics[m]):>8.3f}" for m in metric_keys)
     print(f"{'MEAN':<{col_w}}  {means_str}")
     print(f"  (n={len(ret_scores)} questions with gold labels)\n")
 
@@ -224,7 +218,7 @@ def main() -> None:
         type=Path,
         default=os.getenv("EVAL_QUESTIONS_PATH"),
         help="Path to questions.jsonl (overrides inline EVAL_QUESTIONS). "
-             "Can also be set via EVAL_QUESTIONS_PATH env var.",
+        "Can also be set via EVAL_QUESTIONS_PATH env var.",
     )
     parser.add_argument(
         "--output",
@@ -257,6 +251,7 @@ def main() -> None:
     if args.no_ragas:
         # Build a minimal DataFrame from retrieval scores only and save
         import pandas as pd
+
         rows = []
         for q in questions:
             row = {

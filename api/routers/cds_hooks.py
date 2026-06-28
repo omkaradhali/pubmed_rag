@@ -210,9 +210,7 @@ async def pubmed_rag_service(request: CDSHookRequest) -> CDSHookResponse:
             ]
         )
 
-    _logger.info(
-        "CDS Hook query (hookInstance=%s): %s", request.hookInstance, query[:80]
-    )
+    _logger.info("CDS Hook query (hookInstance=%s): %s", request.hookInstance, query[:80])
 
     try:
         result = await asyncio.to_thread(
@@ -242,8 +240,7 @@ async def pubmed_rag_service(request: CDSHookRequest) -> CDSHookResponse:
 
     # Build markdown detail: full answer + source attribution list
     source_list = "\n".join(
-        f"{i}. **{src.title}** — {src.journal} ({src.year}) · "
-        f"[PubMed {src.pmid}]({src.pubmed_url})"
+        f"{i}. **{src.title}** — {src.journal} ({src.year}) · [PubMed {src.pmid}]({src.pubmed_url})"
         for i, src in enumerate(result.sources, 1)
     )
     detail = f"{result.answer}\n\n---\n\n**Sources**\n\n{source_list}"
