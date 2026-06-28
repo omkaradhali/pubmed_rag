@@ -2,23 +2,26 @@
 embed.py — Embed text chunks into dense vectors using sentence-transformers.
 
 The embedding model is selected by the EMBEDDING_PROVIDER env var (ADR-034):
-miniml (all-MiniLM-L6-v2, 384-dim, default) or bge (BAAI/bge-large-en-v1.5,
-1024-dim). It loads lazily on first call to get_model() — not at import time —
-so importing the module triggers no download and is test-safe.
+  miniml   — all-MiniLM-L6-v2, 384-dim, default (symmetric)
+  bge      — BAAI/bge-large-en-v1.5, 1024-dim (asymmetric, query prefix)
+  medcpt   — ncbi/MedCPT-Article-Encoder, 768-dim (asymmetric, separate query
+             model ncbi/MedCPT-Query-Encoder — D-043, locked 2026-06-28)
 
-Passages (chunk text) are embedded with no prefix; queries go through
-embed_query(), which applies the provider's query instruction prefix (BGE is
-asymmetric — see below). All vectors are L2-normalised, so cosine similarity
-equals the dot product — used by retrieve.py.
+Passages (chunk text) are embedded with get_model(); queries go through
+embed_query(), which uses get_query_model(). For miniml/bge these return the
+same model (query differentiated by prefix); for medcpt they are two separate
+HuggingFace models loaded as independent singletons — the article encoder and
+the query encoder were trained jointly by NCBI on 255M PubMed click-throughs.
 
 Switching providers requires re-embedding the whole corpus and rebuilding the
-vector store (different model → different, often larger vectors → new collection).
+vector store (different model → different vector space → incompatible collection).
 
 Public API:
     EMBEDDING_PROVIDER                    — active provider (env-selected)
-    MODEL_NAME                            — resolved HF model id
-    get_model()            -> SentenceTransformer  # lazy singleton accessor
-    embed_query(query)     -> list[float]           # query vector (with prefix)
+    MODEL_NAME                            — resolved HF article-encoder model id
+    get_model()            -> SentenceTransformer  # lazy article-encoder singleton
+    get_query_model()      -> SentenceTransformer  # lazy query-encoder singleton
+    embed_query(query)     -> list[float]           # query vector (provider-aware)
     embed_chunks(chunks)   -> list[dict]            # NEW dicts with embedding (children)
     save_embeddings(chunks, path) -> None           # write chunks to JSONL
 """
@@ -31,23 +34,26 @@ from sentence_transformers import SentenceTransformer
 
 _logger = logging.getLogger(__name__)
 
-# Embedding provider dispatch (EMBEDDING_PROVIDER env var, see ADR-034).
+# Embedding provider dispatch (EMBEDDING_PROVIDER env var, see ADR-034 + D-043).
 #
-# Both providers are sentence-transformers bi-encoders. The correctness-critical
-# difference is query/passage SYMMETRY:
-#   * miniml (all-MiniLM-L6-v2) — SYMMETRIC: query and passage encoded the same,
-#     no prefix.
-#   * bge (BAAI/bge-large-en-v1.5) — ASYMMETRIC: expects a short instruction
-#     prepended to the QUERY only. Omitting it silently degrades retrieval;
-#     passages get no prefix.
+# Each entry: (article_model_id, query_prefix, query_model_id | None).
 #
-# Each entry: (hf_model_id, query_instruction_prefix).
-_PROVIDERS: dict[str, tuple[str, str]] = {
-    "miniml": ("all-MiniLM-L6-v2", ""),
+# query/passage SYMMETRY rules:
+#   miniml  — SYMMETRIC: same model, no prefix for either side.
+#   bge     — ASYMMETRIC via PREFIX: same model, instruction prefix on query only.
+#             Omitting the prefix silently degrades retrieval (Day-19 ablation).
+#   medcpt  — ASYMMETRIC via SEPARATE MODEL: ncbi/MedCPT-Article-Encoder encodes
+#             passages; ncbi/MedCPT-Query-Encoder encodes queries. Both trained
+#             jointly by NCBI on 255M PubMed click-throughs (D-043). No prefix
+#             needed — the separate model handles the query/passage distinction.
+_PROVIDERS: dict[str, tuple[str, str, str | None]] = {
+    "miniml": ("all-MiniLM-L6-v2", "", None),
     "bge": (
         "BAAI/bge-large-en-v1.5",
         "Represent this sentence for searching relevant passages: ",
+        None,
     ),
+    "medcpt": ("ncbi/MedCPT-Article-Encoder", "", "ncbi/MedCPT-Query-Encoder"),
 }
 
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "miniml").lower()
@@ -58,36 +64,58 @@ if EMBEDDING_PROVIDER not in _PROVIDERS:
         f"Choose one of: {', '.join(_PROVIDERS)}."
     )
 
-MODEL_NAME, _QUERY_PREFIX = _PROVIDERS[EMBEDDING_PROVIDER]
+MODEL_NAME, _QUERY_PREFIX, _QUERY_MODEL_NAME = _PROVIDERS[EMBEDDING_PROVIDER]
 
-# Loaded on the first call to get_model(). Never loaded at import time.
+# Article-encoder singleton — loaded on first get_model() call, never at import time.
 _model: SentenceTransformer | None = None
+# Query-encoder singleton — only used when _QUERY_MODEL_NAME is not None (medcpt).
+_query_model: SentenceTransformer | None = None
 
 
 def get_model() -> SentenceTransformer:
-    """Return the shared embedding model, initialising it on first call.
+    """Return the article-encoder singleton, loading it on first call.
 
-    Which model loads is set by EMBEDDING_PROVIDER (default: miniml). The corpus
-    and the query must be embedded by the SAME model — vectors from different
-    models are geometrically incompatible — so re-seeding and query-time
-    retrieval must run with the same EMBEDDING_PROVIDER.
+    Used for embedding corpus chunks. Which model loads is set by
+    EMBEDDING_PROVIDER (default: miniml). The corpus and queries must use
+    compatible models — re-seeding and query-time retrieval must run with the
+    same EMBEDDING_PROVIDER value.
     """
     global _model
     if _model is None:
-        _logger.info("Loading embedding model: %s (provider=%s)", MODEL_NAME, EMBEDDING_PROVIDER)
+        _logger.info("Loading article encoder: %s (provider=%s)", MODEL_NAME, EMBEDDING_PROVIDER)
         _model = SentenceTransformer(MODEL_NAME)
     return _model
 
 
-def embed_query(query: str) -> list[float]:
-    """Embed one query string, applying the provider's query instruction prefix.
+def get_query_model() -> SentenceTransformer:
+    """Return the query-encoder singleton, loading it on first call.
 
-    Asymmetric models (BGE) need a prefix on the query but not on passages;
-    symmetric models (miniml) use an empty prefix. Centralising it here keeps
-    retrieve.py provider-agnostic. Returns a plain list of floats (L2-normalised).
+    For miniml and bge this is the same model as get_model() (query
+    differentiation is handled by the prefix in embed_query). For medcpt it is
+    a separate ncbi/MedCPT-Query-Encoder model — the two encoders were trained
+    jointly so their vector spaces are compatible.
+    """
+    global _query_model
+    if _QUERY_MODEL_NAME is None:
+        return get_model()
+    if _query_model is None:
+        _logger.info(
+            "Loading query encoder: %s (provider=%s)", _QUERY_MODEL_NAME, EMBEDDING_PROVIDER
+        )
+        _query_model = SentenceTransformer(_QUERY_MODEL_NAME)
+    return _query_model
+
+
+def embed_query(query: str) -> list[float]:
+    """Embed one query string using the provider's query encoder.
+
+    For miniml/bge: uses the shared model with an optional instruction prefix.
+    For medcpt: uses the separate MedCPT-Query-Encoder (no prefix needed).
+    Returns a plain list of floats (L2-normalised). retrieve.py calls this
+    and remains provider-agnostic.
     """
     text = _QUERY_PREFIX + query
-    return get_model().encode([text], normalize_embeddings=True).tolist()[0]
+    return get_query_model().encode([text], normalize_embeddings=True).tolist()[0]
 
 
 # Core logic
@@ -112,7 +140,7 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
 
     Each returned dict has a new key:
         embedding (list[float]) — dense vector; dimension depends on the provider
-                                  (miniml=384, bge=1024)
+                                  (miniml=384, bge=1024, medcpt=768)
 
     Args:
         chunks: List of chunk dicts from chunk.py (must have a "text" key).

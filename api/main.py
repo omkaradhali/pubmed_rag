@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import get_settings
 from api.logging_config import configure_logging, request_id_var
-from api.routers import ask, health
+from api.routers import ask, cds_hooks, health
 from pubmed_rag import __version__
 
 logger = logging.getLogger(__name__)
@@ -49,3 +49,4 @@ async def inject_request_id(request: Request, call_next):
 
 app.include_router(health.router)
 app.include_router(ask.router)
+app.include_router(cds_hooks.router)

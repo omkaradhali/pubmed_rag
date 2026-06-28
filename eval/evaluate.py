@@ -230,8 +230,10 @@ def run_single(question: str, ground_truth: str) -> dict:
         ground_truth: Short reference answer (used by context_precision only).
 
     Returns:
-        Dict with keys: question, answer, contexts, ground_truth.
+        Dict with keys: question, answer, contexts, ground_truth, pmids.
         `contexts` is list[str] — one entry per retrieved chunk's raw text.
+        `pmids` is list[str] — PMIDs of the retrieved sources (same order).
+        Extra keys are ignored by RAGAS and passed through to the CSV.
     """
     result = run_pipeline_structured(query=question, mode="incremental", n_results=5)
     return {
@@ -239,6 +241,7 @@ def run_single(question: str, ground_truth: str) -> dict:
         "answer": result.answer,
         "contexts": [src.text for src in result.sources],
         "ground_truth": ground_truth,
+        "pmids": [src.pmid for src in result.sources],
     }
 
 
