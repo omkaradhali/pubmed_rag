@@ -106,9 +106,7 @@ _RE_MUTATION = re.compile(r"\b[A-Z]\d+[A-Z]\b")
 # Clinical trial identifiers.
 _RE_TRIAL = re.compile(r"\b(?:NCT\d+|KEYNOTE-\d+|CheckMate-\d+|IMpower\d+)\b", re.IGNORECASE)
 # Common biomarker abbreviations in oncology.
-_RE_BIOMARKER = re.compile(
-    r"\b(?:MSI-[HL]|dMMR|pMMR|TMB|HER2|PD-L1|CTLA-4|PD-1|CDK4|CDK6)\b"
-)
+_RE_BIOMARKER = re.compile(r"\b(?:MSI-[HL]|dMMR|pMMR|TMB|HER2|PD-L1|CTLA-4|PD-1|CDK4|CDK6)\b")
 
 # BM25 module-level cache — built lazily on first hybrid query, then reused.
 # Invalidated whenever clear_cache() is called on the parents module.
