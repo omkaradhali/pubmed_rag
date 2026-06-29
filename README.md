@@ -14,6 +14,8 @@ A production-grade RAG pipeline for clinical literature. Fetch PubMed abstracts,
 
 - **Full ingestion pipeline** — PubMed E-utilities → parent-child chunking → sentence-transformer embeddings → ChromaDB
 - **Two-stage retrieval** — bi-encoder dense retrieval shortlists candidates; `ncbi/MedCPT-Cross-Encoder` reranks for clinical relevance
+- **Dynamic hybrid search** — entity-gated BM25+RRF fusion activates only when the query contains named entities (drug names, gene symbols, trial IDs); dense-only otherwise
+- **Input + output guardrails** — topic relevance check and injection detection gate queries before retrieval; citation presence and lexical faithfulness checks flag answers after generation
 - **Citation-enforced generation** — the LLM is instructed to cite every claim inline; hallucinated sources are structurally prevented
 - **HL7 CDS Hooks integration** — `GET /cds-services` discovery + `POST /cds-services/pubmed-rag` patient-view hook; plug into any CDS Hooks-compatible EHR
 - **Gradio demo UI** — browser-based interface at `demo/gradio_app.py`; no API tooling required
@@ -27,36 +29,66 @@ A production-grade RAG pipeline for clinical literature. Fetch PubMed abstracts,
 
 ## Architecture
 
+### Ingestion (offline, run once or on a schedule)
+
 ```
 PubMed E-utilities
        │
        ▼
-  ingest.py ──────────────────── abstracts.jsonl
-       │                          (pmid, title, abstract, authors,
-       │                           journal, year, doi, mesh_terms, ...)
+  ingest.py ─────────── abstracts.jsonl
+                         (pmid, title, abstract, authors, journal,
+                          year, doi, mesh_terms, publication_types)
+       │
        ▼
-  chunk.py ───────────────────── chunks.jsonl
-       │                          (1,000-char windows, 100-char overlap,
-       │                           full source metadata preserved)
+  chunk.py ──────────┬─ parents.jsonl   (~1,200-char parent passages)
+  parent-child split └─ child chunks    (~300-char, embedded targets)
+       │
        ▼
-  embed.py ───────────────────── 384-dim dense vectors
-       │                          (all-MiniLM-L6-v2, L2-normalised)
+  embed.py ─────────── embeddings.jsonl  (384-dim, all-MiniLM-L6-v2)
+       │
        ▼
-vectorstore.py ─────────────────  ChromaDB (default) / Qdrant (production)
-                                          │
-         query ───────────────────────────┘
-                                          │
-                                          ▼
-                                retrieve.py  (cosine similarity, top-k)
-                                          │
-                                          ▼
-                                generate.py  (citation-enforced prompt)
-                                          │
-                                          ▼
-                                 answer + cited sources
+  vectorstore.py ───── ChromaDB / Qdrant  (children indexed by chunk_id)
 ```
 
-v0.2 adds a two-stage retrieval layer: children are retrieved densely, reranked by `ncbi/MedCPT-Cross-Encoder`, then deduped to unique parents before generation. Retrieval metrics at N=97: **recall@20 = 0.97 · MRR = 0.95**.
+### Query path (online, ~1-3 sec)
+
+```
+  query
+    │
+    ▼
+  guardrails.py  [INPUT]
+  · topic relevance check  ─── off-topic? → 422 early exit
+  · injection detection    ─── injection?  → 422 early exit
+    │
+    ▼
+  retrieve.py
+  ┌───────────────────────────────────────────────────┐
+  │  dense search  ChromaDB cosine similarity, top-k  │
+  │  + hybrid?     BM25+RRF (entity-gated, opt-in)   │
+  │                ↳ Gate 1: entity detected in query  │
+  │                ↳ Gate 2: top BM25 score > 90.0    │
+  └───────────────────────────────────────────────────┘
+    │
+    ▼
+  rerank.py       ncbi/MedCPT-Cross-Encoder
+                  re-scores (query, child) pairs → top-5
+    │
+    ▼
+  parents.py      resolve child hits → full parent text
+    │
+    ▼
+  generate.py     citation-enforced LLM prompt
+    │
+    ▼
+  guardrails.py  [OUTPUT]
+  · citation check     ─── no [N] markers? → flag
+  · faithfulness check ─── Jaccard < 0.05?  → flag
+    │
+    ▼
+  PipelineResult  (answer · sources · guardrail_flags)
+```
+
+Retrieval metrics at N=97 labeled questions: **recall@20 = 0.97 · MRR = 0.95 · nDCG@20 = 0.90**.
 
 The pipeline runs in two modes:
 
@@ -277,17 +309,21 @@ python scripts/eval_v0_2.py \
 pubmed_rag/
 ├── src/pubmed_rag/         # core pipeline library
 │   ├── ingest.py           # PubMed E-utilities fetcher
-│   ├── chunk.py            # RecursiveCharacterTextSplitter wrapper
-│   ├── embed.py            # sentence-transformer embedder
+│   ├── chunk.py            # parent-child RecursiveCharacterTextSplitter
+│   ├── embed.py            # sentence-transformer embedder (pluggable provider)
 │   ├── vectorstore.py      # ChromaDB / Qdrant abstraction
-│   ├── retrieve.py         # cosine similarity retriever
-│   ├── generate.py         # citation-enforced LLM caller
-│   └── pipeline.py         # end-to-end orchestrator + dataclasses
+│   ├── parents.py          # parent-doc sidecar JSONL store + lazy-load cache
+│   ├── retrieve.py         # dense retrieval + optional BM25+RRF hybrid
+│   ├── rerank.py           # ncbi/MedCPT-Cross-Encoder reranker
+│   ├── generate.py         # citation-enforced LLM caller (Ollama / Anthropic / OpenAI)
+│   ├── guardrails.py       # input/output safety checks (topic, injection, citations, faithfulness)
+│   ├── types.py            # shared TypedDicts and dataclasses
+│   └── pipeline.py         # end-to-end orchestrator + PipelineResult dataclass
 ├── api/                    # FastAPI application
-│   ├── main.py             # app factory, middleware
+│   ├── main.py             # app factory, CORS middleware, request-ID injection
 │   ├── config.py           # Pydantic BaseSettings
 │   ├── schemas.py          # request / response models
-│   ├── logging_config.py   # JSON logging + request ID
+│   ├── logging_config.py   # structured JSON logging + request ID context var
 │   └── routers/
 │       ├── health.py       # GET /health
 │       ├── ask.py          # POST /ask
@@ -296,12 +332,14 @@ pubmed_rag/
 │   └── gradio_app.py       # Gradio web UI (calls /ask, runs on port 7860)
 ├── eval/
 │   ├── evaluate.py         # RAGAS evaluation (20 questions, 3 metrics)
-│   ├── retrieval_metrics.py # recall@k, MRR, nDCG@k (deterministic, zero variance)
+│   ├── retrieval_metrics.py # recall@k, MRR, nDCG@k (deterministic, zero LLM cost)
 │   └── questions.sample.jsonl  # 15-question public eval sample
 ├── scripts/
 │   └── eval_v0_2.py        # unified eval driver (RAGAS + deterministic, --questions flag)
-├── tests/                  # pytest unit tests (74 tests)
-├── docs/decisions/         # architecture decision records (ADR-033-035, 039)
+├── tests/                  # pytest unit tests (113 tests, zero external dependencies)
+├── docs/
+│   ├── decisions/          # architecture decision records (ADR-033-035, 039-041)
+│   └── known-limitations.md
 ├── Dockerfile
 ├── docker-compose.yml
 └── .env.example
@@ -333,6 +371,8 @@ Design decisions for the open-source architecture are documented in `docs/decisi
 | [ADR-034](docs/decisions/ADR-034-embedding-provider.md) | Pluggable embedding: all-MiniLM (dev) / text-embedding-3-small (prod) |
 | [ADR-035](docs/decisions/ADR-035-corpus-scope.md) | Corpus scope: oncology default, configurable depth |
 | [ADR-039](docs/decisions/ADR-039-multi-specialty-corpus.md) | Multi-specialty support via metadata filter |
+| [ADR-040](docs/decisions/ADR-040-guardrails.md) | Deterministic input/output guardrails: pattern-based, no LLM cost |
+| [ADR-041](docs/decisions/ADR-041-hybrid-bm25-rrf.md) | Dynamic hybrid BM25+dense+RRF: entity-gated, dense-only default |
 
 ---
 
