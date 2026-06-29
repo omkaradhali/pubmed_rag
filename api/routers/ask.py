@@ -3,7 +3,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from api.schemas import AskRequest, AskResponse, SourceChunkResponse
+from api.schemas import AskRequest, AskResponse, GuardrailFlagResponse, SourceChunkResponse
+from pubmed_rag.guardrails import GuardrailError
 from pubmed_rag.pipeline import run_pipeline_structured
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,15 @@ async def ask(body: AskRequest) -> AskResponse:
             n_results=body.n_results,
             min_score=body.min_score,
         )
+    except GuardrailError as exc:
+        logger.warning(
+            "input guardrail rejected query",
+            extra={"code": exc.result.code, "reason": exc.result.reason},
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc.result.code), "reason": exc.result.reason},
+        ) from exc
     except Exception as exc:
         logger.exception("pipeline error")
         raise HTTPException(status_code=500, detail="Pipeline error") from exc
@@ -94,4 +104,12 @@ async def ask(body: AskRequest) -> AskResponse:
         avg_score=result.avg_score,
         confidence_tier=result.confidence_tier,
         coverage_note=result.coverage_note,
+        guardrail_flags=[
+            GuardrailFlagResponse(
+                code=f["code"],
+                reason=f["reason"],
+                detail=f.get("detail", {}),
+            )
+            for f in result.guardrail_flags
+        ],
     )

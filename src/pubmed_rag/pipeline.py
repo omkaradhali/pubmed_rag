@@ -26,7 +26,7 @@ import datetime
 import logging
 import os
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -34,6 +34,7 @@ from dotenv import load_dotenv
 from pubmed_rag.chunk import chunk_records, load_and_chunk, split_parents_children
 from pubmed_rag.embed import embed_chunks, save_embeddings
 from pubmed_rag.generate import generate_answer
+from pubmed_rag.guardrails import run_input_guardrails, run_output_guardrails
 from pubmed_rag.ingest import ingest, save_to_jsonl
 from pubmed_rag.parents import append_parents, save_parents
 from pubmed_rag.retrieve import retrieve
@@ -141,6 +142,10 @@ class PipelineResult:
     # Coverage
     # Set when the LLM explicitly indicates the corpus lacks sufficient context.
     coverage_note: str | None = None
+
+    # Output guardrail warnings (empty list = all checks passed).
+    # Each entry is a dict with keys: code, reason, detail.
+    guardrail_flags: list[dict] = field(default_factory=list)
 
 
 # Output formatting
@@ -262,6 +267,9 @@ def run_pipeline_structured(
     Returns:
         PipelineResult with all fields populated.
     """
+    # Input guardrails — raises GuardrailError on failure; caller handles it.
+    run_input_guardrails(query)
+
     if mode == "full":
         _logger.info("Mode: full — rebuilding corpus from scratch.")
         _run_full_ingest(reldate=reldate)
@@ -280,6 +288,13 @@ def run_pipeline_structured(
         else "No relevant abstracts found in the current corpus for this query."
     )
     _logger.info("Generated answer (%d chars).", len(answer))
+
+    # Output guardrails — advisory warnings, never block the response.
+    guardrail_flags = [
+        asdict(r)
+        for r in run_output_guardrails(answer, chunks)
+        if not r.passed
+    ]
 
     # Build sources
     sources = [
@@ -353,6 +368,7 @@ def run_pipeline_structured(
         max_score_retrieved=round(max(scores), 4) if scores else 0.0,
         confidence_tier=confidence_tier,
         coverage_note=coverage_note,
+        guardrail_flags=guardrail_flags,
     )
 
 
