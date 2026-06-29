@@ -4,8 +4,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from api.config import get_settings
+from api.limiter import limiter
 from api.logging_config import configure_logging, request_id_var
 from api.routers import ask, cds_hooks, health
 from pubmed_rag import __version__
@@ -25,6 +28,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="pubmed_rag", version=__version__, lifespan=lifespan)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,

@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # API server
     log_level: str = "INFO"
 
+    # Auth — comma-separated static API keys. Empty = auth disabled (safe for local dev).
+    # Stored as a raw string so pydantic-settings doesn't try to JSON-decode it.
+    # Parsed into a list inside verify_api_key (api/dependencies.py).
+    api_keys: str = ""
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: str | list) -> list[str]:

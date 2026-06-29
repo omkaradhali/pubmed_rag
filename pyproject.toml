@@ -43,6 +43,8 @@ dependencies = [
     "openai>=1.30",
     # Hybrid BM25 retrieval
     "rank-bm25>=0.2",
+    # Rate limiting
+    "slowapi>=0.1.9",
     # Utilities
     "python-dotenv>=1.0",
     "tqdm>=4.67",

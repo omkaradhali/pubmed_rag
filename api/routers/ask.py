@@ -1,8 +1,10 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from api.dependencies import verify_api_key
+from api.limiter import limiter
 from api.schemas import AskRequest, AskResponse, GuardrailFlagResponse, SourceChunkResponse
 from pubmed_rag.guardrails import GuardrailError
 from pubmed_rag.pipeline import run_pipeline_structured
@@ -17,10 +19,18 @@ router = APIRouter(tags=["ask"])
     summary="Ask a clinical question",
     responses={
         200: {"description": "Answer generated successfully with cited sources."},
+        401: {"description": "Invalid or missing X-API-Key header (when API_KEYS is configured)."},
+        422: {"description": "Input guardrail rejected query (off-topic or injection detected)."},
+        429: {"description": "Rate limit exceeded — 10 requests per hour per IP."},
         500: {"description": "Pipeline error — embedding, retrieval, or LLM call failed."},
     },
 )
-async def ask(body: AskRequest) -> AskResponse:
+@limiter.limit("10/hour")
+async def ask(
+    request: Request,
+    body: AskRequest,
+    _: None = Depends(verify_api_key),
+) -> AskResponse:
     """
     Submit a clinical question and receive a cited answer grounded in PubMed abstracts.
 

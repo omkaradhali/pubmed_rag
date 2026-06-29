@@ -6,11 +6,15 @@ imported, so these tests never trigger the ~90MB model download in CI.
 run_pipeline_structured is mocked per-test via the mock_pipeline fixture.
 """
 
-from unittest.mock import patch
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
 
 import pytest
+from api.config import Settings, get_settings
+from api.limiter import limiter
 from api.main import app
 from fastapi.testclient import TestClient
+from slowapi.errors import RateLimitExceeded
 
 from pubmed_rag.pipeline import PipelineResult, SourceChunk
 
@@ -147,3 +151,66 @@ class TestAsk:
     def test_request_id_header_present(self, mock_pipeline):
         response = client.post("/ask", json={"query": "test"})
         assert "x-request-id" in response.headers
+
+
+# ── Auth helpers ─────────────────────────────────────────────────────────────
+
+
+@contextmanager
+def _auth_override(api_keys: list[str]):
+    """Override get_settings so verify_api_key sees a non-empty api_keys string."""
+    mock_settings = MagicMock(spec=Settings)
+    mock_settings.api_keys = ",".join(api_keys)  # str, not list (matches config field type)
+    app.dependency_overrides[get_settings] = lambda: mock_settings
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+
+# POST /ask — auth (X-API-Key)
+class TestAuth:
+    def test_no_keys_configured_passes_through(self, mock_pipeline):
+        # Default api_keys=[] — auth disabled, any call should succeed
+        response = client.post("/ask", json={"query": "test"})
+        assert response.status_code == 200
+
+    def test_valid_key_returns_200(self, mock_pipeline):
+        with _auth_override(["sk-test-abc"]):
+            response = client.post(
+                "/ask",
+                json={"query": "test"},
+                headers={"X-API-Key": "sk-test-abc"},
+            )
+            assert response.status_code == 200
+
+    def test_missing_key_returns_401(self, mock_pipeline):
+        with _auth_override(["sk-test-abc"]):
+            response = client.post("/ask", json={"query": "test"})
+            assert response.status_code == 401
+
+    def test_invalid_key_returns_401(self, mock_pipeline):
+        with _auth_override(["sk-test-abc"]):
+            response = client.post(
+                "/ask",
+                json={"query": "test"},
+                headers={"X-API-Key": "wrong-key"},
+            )
+            assert response.status_code == 401
+
+
+# POST /ask — rate limiting
+class TestRateLimit:
+    def test_rate_limit_exceeded_returns_429(self, mock_pipeline):
+        def _fake_check(request, func, in_middleware):
+            mock_limit = MagicMock()
+            mock_limit.error_message = ""
+            request.state.view_rate_limit = (mock_limit, [])
+            raise RateLimitExceeded(mock_limit)
+
+        with (
+            patch.object(limiter, "_check_request_limit", side_effect=_fake_check),
+            patch.object(limiter, "_inject_headers", side_effect=lambda r, _: r),
+        ):
+            response = client.post("/ask", json={"query": "test"})
+            assert response.status_code == 429
