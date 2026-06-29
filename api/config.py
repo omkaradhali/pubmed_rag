@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     rerank_model: str = "ncbi/MedCPT-Cross-Encoder"
     rerank_pool: int = 30  # child candidates shortlisted before reranking
 
+    # Hybrid retrieval — BM25 + dense → RRF fusion (v0.2, Day 23)
+    hybrid_search_enabled: bool = False
+
     # LLM provider — ollama (default), anthropic, haiku, sonnet, openai
     llm_provider: str = "ollama"
     llm_model: str = "llama3.1:8b"

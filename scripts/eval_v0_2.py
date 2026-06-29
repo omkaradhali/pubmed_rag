@@ -238,6 +238,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Guard: check ChromaDB dimension matches EMBEDDING_PROVIDER before loading
+    # the model or running any questions — fails fast with a clear fix command.
+    from pubmed_rag.vectorstore import validate_collection_dimension
+
+    validate_collection_dimension()
+
     # Load questions from file or fall back to the 20 inline questions
     if args.questions:
         questions = load_questions(args.questions)

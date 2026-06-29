@@ -1,6 +1,17 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class GuardrailFlagResponse(BaseModel):
+    code: str = Field(description="Machine-readable guardrail code, e.g. MISSING_CITATIONS.")
+    reason: str = Field(description="Human-readable explanation of why the check failed.")
+    detail: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Optional structured detail, e.g. out-of-range citation numbers or low-overlap pairs."
+        ),
+    )
 
 
 class HealthResponse(BaseModel):
@@ -146,4 +157,12 @@ class AskResponse(BaseModel):
         description="Set when the LLM signals the corpus lacks sufficient context for the query "
         "(e.g. answer contains phrases like 'does not address' or 'cannot answer'). "
         "Null when the answer is fully grounded."
+    )
+    guardrail_flags: list[GuardrailFlagResponse] = Field(
+        default_factory=list,
+        description=(
+            "Output guardrail warnings. Empty when all checks pass. "
+            "Non-empty entries indicate citation or faithfulness issues with the generated answer. "
+            "The answer is still returned — these are advisory flags, not hard blocks."
+        ),
     )

@@ -14,9 +14,10 @@ List fields (authors, publication_types, mesh_terms) are stored as JSON
 strings and deserialized in retrieve.py when results are returned.
 
 Public API:
-    get_collection()              -> chromadb.Collection   # open or create
-    seed_collection(path)         -> int                   # upsert from JSONL
-    upsert_chunks(chunks)         -> int                   # upsert in-memory chunks
+    get_collection()                        -> chromadb.Collection   # open or create
+    validate_collection_dimension()         -> None                  # raises on mismatch
+    seed_collection(path)                   -> int                   # upsert from JSONL
+    upsert_chunks(chunks)                   -> int                   # upsert in-memory chunks
 """
 
 import json
@@ -39,6 +40,15 @@ _CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma_db")
 # Keeps memory flat when the JSONL grows beyond a few thousand chunks.
 _UPSERT_BATCH_SIZE = 500
 
+# Expected vector dimensions per embedding provider. Used by
+# validate_collection_dimension() to catch reseed/provider mismatches before
+# a query fails mid-run with an opaque ChromaDB error.
+_PROVIDER_DIMS: dict[str, int] = {
+    "miniml": 384,
+    "bge": 1024,
+    "medcpt": 768,
+}
+
 
 # Collection access
 def get_collection() -> chromadb.Collection:
@@ -59,6 +69,53 @@ def get_collection() -> chromadb.Collection:
     return client.get_or_create_collection(
         name=COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
+    )
+
+
+def validate_collection_dimension() -> None:
+    """Verify ChromaDB vector dimension matches the active EMBEDDING_PROVIDER.
+
+    Fetches one embedding from the collection and compares its length against
+    the expected dimension for the current EMBEDDING_PROVIDER env var. Raises
+    ValueError with a clear reseed command if they don't match.
+
+    Call this at the start of any eval or retrieval script to catch provider/
+    reseed mismatches before spending time on model loading and question evaluation.
+
+    Skips silently when the collection is empty (nothing to validate).
+    """
+    # Import lazily to avoid making embed a hard dependency of vectorstore at
+    # module load time.
+    from pubmed_rag.embed import EMBEDDING_PROVIDER  # noqa: PLC0415
+
+    expected_dim = _PROVIDER_DIMS.get(EMBEDDING_PROVIDER)
+    if expected_dim is None:
+        _logger.warning(
+            "Unknown EMBEDDING_PROVIDER=%r — skipping dimension check.", EMBEDDING_PROVIDER
+        )
+        return
+
+    collection = get_collection()
+    if collection.count() == 0:
+        return  # nothing seeded yet; no mismatch possible
+
+    result = collection.get(limit=1, include=["embeddings"])
+    embeddings = result.get("embeddings")
+    if embeddings is None or len(embeddings) == 0:
+        return
+
+    actual_dim = len(embeddings[0])
+    if actual_dim != expected_dim:
+        raise ValueError(
+            f"ChromaDB dimension mismatch: collection has {actual_dim}-dim vectors "
+            f"but EMBEDDING_PROVIDER={EMBEDDING_PROVIDER!r} expects {expected_dim}-dim.\n"
+            f"Reseed with the correct provider:\n"
+            f"  EMBEDDING_PROVIDER={EMBEDDING_PROVIDER} "
+            f".venv/bin/python scripts/reseed_v0_2.py"
+        )
+
+    _logger.debug(
+        "Dimension check passed: EMBEDDING_PROVIDER=%s, dim=%d.", EMBEDDING_PROVIDER, actual_dim
     )
 
 

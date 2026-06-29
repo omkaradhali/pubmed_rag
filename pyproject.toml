@@ -41,6 +41,8 @@ dependencies = [
     # LLM
     "anthropic>=0.49",
     "openai>=1.30",
+    # Hybrid BM25 retrieval
+    "rank-bm25>=0.2",
     # Utilities
     "python-dotenv>=1.0",
     "tqdm>=4.67",
