@@ -19,10 +19,10 @@ is still returned to the caller with the flags attached.
 import re
 import string
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class GuardrailCode(str, Enum):
+class GuardrailCode(StrEnum):
     OFF_TOPIC = "OFF_TOPIC"
     INJECTION_SUSPECTED = "INJECTION_SUSPECTED"
     MISSING_CITATIONS = "MISSING_CITATIONS"
@@ -51,31 +51,112 @@ class GuardrailError(Exception):
 # A query passes the topic check if ANY of these appear as a whole word.
 # Broad by design — false positives (rejecting valid clinical queries) are
 # worse than false negatives (letting borderline queries through).
-_BIOMEDICAL_TERMS: frozenset[str] = frozenset({
-    "cancer", "tumor", "tumour", "oncology", "oncologist",
-    "therapy", "treatment", "clinical", "patient", "diagnosis",
-    "mutation", "gene", "protein", "drug", "efficacy",
-    "survival", "prognosis", "chemotherapy", "immunotherapy",
-    "biomarker", "pathology", "pathologist", "biopsy",
-    "carcinoma", "sarcoma", "lymphoma", "leukemia", "melanoma",
-    "metastasis", "metastatic", "remission", "recurrence",
-    "trial", "randomized", "cohort", "epidemiology",
-    "inflammatory", "immune", "antibody", "antigen",
-    "receptor", "inhibitor", "agonist", "antagonist",
-    "radiation", "surgery", "resection", "histology",
-    "chromosome", "genomics", "proteomics", "transcriptome",
-    "pubmed", "abstract", "study", "evidence", "literature",
-    "dose", "dosage", "adverse", "toxicity", "safety",
-    "screening", "staging", "grading", "biomarkers",
-    "expression", "amplification", "deletion", "translocation",
-    "her2", "brca", "egfr", "pd-l1", "pd1", "ctla4",
-    "msi", "tmb", "ngs", "wgs", "rna", "dna",
-    "pathogenesis", "etiology", "aetiology", "comorbidity",
-    "progression", "regression", "relapse", "refractory",
-    "adjuvant", "neoadjuvant", "palliative", "curative",
-    "response", "resistance", "sensitization", "synergy",
-    "biopsy", "resection", "excision", "ablation",
-})
+_BIOMEDICAL_TERMS: frozenset[str] = frozenset(
+    {
+        "cancer",
+        "tumor",
+        "tumour",
+        "oncology",
+        "oncologist",
+        "therapy",
+        "treatment",
+        "clinical",
+        "patient",
+        "diagnosis",
+        "mutation",
+        "gene",
+        "protein",
+        "drug",
+        "efficacy",
+        "survival",
+        "prognosis",
+        "chemotherapy",
+        "immunotherapy",
+        "biomarker",
+        "pathology",
+        "pathologist",
+        "biopsy",
+        "carcinoma",
+        "sarcoma",
+        "lymphoma",
+        "leukemia",
+        "melanoma",
+        "metastasis",
+        "metastatic",
+        "remission",
+        "recurrence",
+        "trial",
+        "randomized",
+        "cohort",
+        "epidemiology",
+        "inflammatory",
+        "immune",
+        "antibody",
+        "antigen",
+        "receptor",
+        "inhibitor",
+        "agonist",
+        "antagonist",
+        "radiation",
+        "surgery",
+        "resection",
+        "histology",
+        "chromosome",
+        "genomics",
+        "proteomics",
+        "transcriptome",
+        "pubmed",
+        "abstract",
+        "study",
+        "evidence",
+        "literature",
+        "dose",
+        "dosage",
+        "adverse",
+        "toxicity",
+        "safety",
+        "screening",
+        "staging",
+        "grading",
+        "biomarkers",
+        "expression",
+        "amplification",
+        "deletion",
+        "translocation",
+        "her2",
+        "brca",
+        "egfr",
+        "pd-l1",
+        "pd1",
+        "ctla4",
+        "msi",
+        "tmb",
+        "ngs",
+        "wgs",
+        "rna",
+        "dna",
+        "pathogenesis",
+        "etiology",
+        "aetiology",
+        "comorbidity",
+        "progression",
+        "regression",
+        "relapse",
+        "refractory",
+        "adjuvant",
+        "neoadjuvant",
+        "palliative",
+        "curative",
+        "response",
+        "resistance",
+        "sensitization",
+        "synergy",
+        "biopsy",
+        "resection",
+        "excision",
+        "ablation",
+    }
+)
 
 # Only applied when NO biomedical signal is found — reduces false positives.
 _OFFTOPIC_PATTERNS: list[str] = [
@@ -111,14 +192,12 @@ _INJECTION_PATTERNS: list[str] = [
     r"system\s+prompt",
     r"\bjailbreak\b",
     r"\bDAN\b",
-    r"\{\{",    # Jinja/template injection
-    r"\$\{",    # shell variable expansion
+    r"\{\{",  # Jinja/template injection
+    r"\$\{",  # shell variable expansion
 ]
 
 # Zero-width, bidirectional-override, and BOM characters used to hide payloads.
-_INJECTION_UNICODE_RE = re.compile(
-    r"[​‌‍‪-‮⁦-⁩﻿]"
-)
+_INJECTION_UNICODE_RE = re.compile(r"[​‌‍‪-‮⁦-⁩﻿]")
 
 # Regex to extract all [N] citation markers from answer text.
 _CITATION_RE = re.compile(r"\[(\d+)\]")
@@ -137,17 +216,86 @@ _NO_CONTEXT_PHRASES: tuple[str, ...] = (
 # Common English words + clinical filler stripped before Jaccard computation.
 # Keep medical nouns out of this list — "patient", "study", "result" are too
 # frequent to contribute signal but DO appear in source text.
-_STOPWORDS: frozenset[str] = frozenset({
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
-    "being", "have", "has", "had", "do", "does", "did", "will", "would",
-    "could", "should", "may", "might", "this", "that", "these", "those",
-    "it", "its", "they", "their", "we", "our", "he", "she", "his", "her",
-    "showed", "shown", "found", "suggest", "suggests", "reported",
-    "also", "however", "therefore", "thus", "moreover", "although",
-    "while", "when", "which", "who", "where", "how", "what", "than",
-    "not", "no", "as", "such", "both", "between", "into", "through",
-})
+_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "they",
+        "their",
+        "we",
+        "our",
+        "he",
+        "she",
+        "his",
+        "her",
+        "showed",
+        "shown",
+        "found",
+        "suggest",
+        "suggests",
+        "reported",
+        "also",
+        "however",
+        "therefore",
+        "thus",
+        "moreover",
+        "although",
+        "while",
+        "when",
+        "which",
+        "who",
+        "where",
+        "how",
+        "what",
+        "than",
+        "not",
+        "no",
+        "as",
+        "such",
+        "both",
+        "between",
+        "into",
+        "through",
+    }
+)
 
 
 # ── Input guardrails ─────────────────────────────────────────────────────────
@@ -175,8 +323,7 @@ def check_topic_relevance(query: str) -> GuardrailResult:
     lowered = query.lower()
 
     has_biomedical = any(
-        re.search(r"\b" + re.escape(term) + r"\b", lowered)
-        for term in _BIOMEDICAL_TERMS
+        re.search(r"\b" + re.escape(term) + r"\b", lowered) for term in _BIOMEDICAL_TERMS
     )
     if has_biomedical:
         return GuardrailResult(passed=True)
@@ -301,11 +448,7 @@ def check_citations(answer: str, n_sources: int) -> GuardrailResult:
 def _tokenize(text: str) -> set[str]:
     """Lowercase, strip punctuation, split on whitespace, remove stopwords."""
     translator = str.maketrans("", "", string.punctuation)
-    return {
-        w
-        for w in text.lower().translate(translator).split()
-        if w and w not in _STOPWORDS
-    }
+    return {w for w in text.lower().translate(translator).split() if w and w not in _STOPWORDS}
 
 
 def check_faithfulness(answer: str, chunks: list[dict]) -> GuardrailResult:
@@ -346,11 +489,13 @@ def check_faithfulness(answer: str, chunks: list[dict]) -> GuardrailResult:
             jaccard = len(sentence_tokens & chunk_tokens) / len(union)
 
             if jaccard < 0.05:
-                low_overlap_pairs.append({
-                    "sentence": sentence[:200],
-                    "source_n": n,
-                    "jaccard": round(jaccard, 4),
-                })
+                low_overlap_pairs.append(
+                    {
+                        "sentence": sentence[:200],
+                        "source_n": n,
+                        "jaccard": round(jaccard, 4),
+                    }
+                )
 
     if low_overlap_pairs:
         return GuardrailResult(

@@ -8,7 +8,9 @@ class GuardrailFlagResponse(BaseModel):
     reason: str = Field(description="Human-readable explanation of why the check failed.")
     detail: dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional structured detail, e.g. out-of-range citation numbers or low-overlap pairs.",
+        description=(
+            "Optional structured detail, e.g. out-of-range citation numbers or low-overlap pairs."
+        ),
     )
 
 

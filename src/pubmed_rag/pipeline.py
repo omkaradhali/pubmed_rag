@@ -290,11 +290,7 @@ def run_pipeline_structured(
     _logger.info("Generated answer (%d chars).", len(answer))
 
     # Output guardrails — advisory warnings, never block the response.
-    guardrail_flags = [
-        asdict(r)
-        for r in run_output_guardrails(answer, chunks)
-        if not r.passed
-    ]
+    guardrail_flags = [asdict(r) for r in run_output_guardrails(answer, chunks) if not r.passed]
 
     # Build sources
     sources = [
