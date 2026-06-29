@@ -197,10 +197,29 @@ _INJECTION_PATTERNS: list[str] = [
 ]
 
 # Zero-width, bidirectional-override, and BOM characters used to hide payloads.
-_INJECTION_UNICODE_RE = re.compile(r"[​‌‍‪-‮⁦-⁩﻿]")
+# Built with chr() so code point coverage is explicit and auditable without
+# embedding invisible characters in source — previous version used literal
+# invisible chars that were invisible in editors and missing U+200E/200F/2060.
+_INJECTION_UNICODE_RE = re.compile(
+    "["
+    + chr(0x200B)
+    + "-"
+    + chr(0x200F)  # zero-width space, ZWNJ, ZWJ, LRM, RLM
+    + chr(0x202A)
+    + "-"
+    + chr(0x202E)  # LRE, RLE, PDF, LRO, RLO (bidi overrides)
+    + chr(0x2060)  # word joiner
+    + chr(0x2066)
+    + "-"
+    + chr(0x2069)  # LRI, RLI, FSI, PDI (bidi isolates)
+    + chr(0xFEFF)  # BOM / zero-width no-break space
+    + "]"
+)
 
 # Regex to extract all [N] citation markers from answer text.
-_CITATION_RE = re.compile(r"\[(\d+)\]")
+# Capped at 5 digits — prevents adversarial inputs from triggering expensive
+# int() conversion or hitting Python's integer string length limit.
+_CITATION_RE = re.compile(r"\[(\d{1,5})\]")
 
 # These phrases indicate the LLM declared it couldn't answer — citations are
 # intentionally absent and the citation check should be skipped.
@@ -430,7 +449,8 @@ def check_citations(answer: str, n_sources: int) -> GuardrailResult:
             ),
         )
 
-    out_of_range = sorted(set(n for n in cited if n > n_sources))
+    # [0] is invalid — sources are 1-indexed. Also catches numbers exceeding n_sources.
+    out_of_range = sorted(set(n for n in cited if n < 1 or n > n_sources))
     if out_of_range:
         return GuardrailResult(
             passed=False,
