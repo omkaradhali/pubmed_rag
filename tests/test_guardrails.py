@@ -4,6 +4,8 @@ Unit tests for guardrails.py — all four checks + run_* orchestrators.
 All tests are pure-logic, no disk I/O or LLM calls.
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from pubmed_rag.guardrails import (
@@ -14,6 +16,7 @@ from pubmed_rag.guardrails import (
     check_citations,
     check_faithfulness,
     check_injection,
+    check_nli_faithfulness,
     check_topic_relevance,
     is_hard_block,
     run_input_guardrails,
@@ -336,10 +339,11 @@ class TestRunInputGuardrails:
 
 
 class TestRunOutputGuardrails:
-    def test_returns_two_results(self):
+    def test_returns_all_output_checks(self):
+        # citations + lexical faithfulness + NLI faithfulness
         answer = "EGFR mutations are common in lung cancer patients [1]."
         results = run_output_guardrails(answer, [_CHUNK_EGFR])
-        assert len(results) == 2
+        assert len(results) == 3
 
     def test_all_pass_on_clean_answer(self):
         answer = "EGFR mutations are common in lung cancer patients [1]."
@@ -392,6 +396,11 @@ class TestIsHardBlock:
         result = GuardrailResult(passed=False, code=GuardrailCode.CITATION_OUT_OF_RANGE)
         assert is_hard_block(result) is True
 
+    def test_contradicts_source_is_hard_block(self):
+        # A single high-confidence NLI contradiction always blocks.
+        result = GuardrailResult(passed=False, code=GuardrailCode.CONTRADICTS_SOURCE)
+        assert is_hard_block(result) is True
+
     def test_single_low_overlap_is_advisory_not_hard_block(self):
         # One low-overlap pair may be a transition sentence — advisory only.
         assert is_hard_block(_low_overlap_result(1)) is False
@@ -405,3 +414,34 @@ class TestIsHardBlock:
     def test_input_guardrail_codes_are_not_hard_blocks(self):
         # is_hard_block governs the output/retry path only.
         assert is_hard_block(GuardrailResult(passed=False, code=GuardrailCode.OFF_TOPIC)) is False
+
+
+# ── check_nli_faithfulness ───────────────────────────────────────────────────
+
+
+class TestNliFaithfulness:
+    """check_nli_faithfulness wraps faithfulness_nli.find_contradictions. The
+    scorer is stubbed to 0.0 by conftest; here we patch find_contradictions
+    directly to drive the pass/fail branches without the model.
+    """
+
+    def test_passes_when_no_contradictions(self):
+        with patch("pubmed_rag.faithfulness_nli.find_contradictions", return_value=[]):
+            result = check_nli_faithfulness("Grounded claim [1].", [_CHUNK_EGFR])
+        assert result.passed
+        assert result.code is None
+
+    def test_fails_on_contradiction(self):
+        flagged = [{"sentence": "not effective [1]", "source_n": 1, "contradiction": 0.95}]
+        with patch("pubmed_rag.faithfulness_nli.find_contradictions", return_value=flagged):
+            result = check_nli_faithfulness("Drug is not effective [1].", [_CHUNK_EGFR])
+        assert not result.passed
+        assert result.code == GuardrailCode.CONTRADICTS_SOURCE
+        assert result.detail["contradictions"] == flagged
+
+    def test_surfaced_by_run_output_guardrails(self):
+        flagged = [{"sentence": "x [1]", "source_n": 1, "contradiction": 0.9}]
+        with patch("pubmed_rag.faithfulness_nli.find_contradictions", return_value=flagged):
+            results = run_output_guardrails("Drug is not effective [1].", [_CHUNK_EGFR])
+        failed_codes = [r.code for r in results if not r.passed]
+        assert GuardrailCode.CONTRADICTS_SOURCE in failed_codes

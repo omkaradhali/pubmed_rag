@@ -31,8 +31,11 @@ dependencies = [
     # Embeddings — torch source is overridden to CPU-only build in [tool.uv.sources]
     "torch>=2.0",
     "sentence-transformers>=3.3",
-    # Cross-encoder reranker (ncbi/MedCPT-Cross-Encoder via transformers)
+    # Cross-encoder reranker (ncbi/MedCPT-Cross-Encoder via transformers) and
+    # NLI faithfulness check (cross-encoder/nli-deberta-v3-small)
     "transformers>=4.40",
+    # DeBERTa-v3 tokenizer (NLI model) is SentencePiece-based
+    "sentencepiece>=0.2",
     # Vector store
     "chromadb>=0.6",
     # API
