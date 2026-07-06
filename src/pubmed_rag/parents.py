@@ -23,11 +23,13 @@ Public API:
     get_parent(chunk_id)          — fetch a parent by chunk_id (lazy-loads on miss)
     get_all_parents(path)         — return all parent dicts as a list (for BM25 index)
     clear_cache()                 — reset the module cache (tests, hot reload)
+    register_invalidation_hook(h) — run h() whenever clear_cache() fires
 """
 
 import json
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 _logger = logging.getLogger(__name__)
@@ -38,6 +40,20 @@ PARENTS_PATH = Path(os.getenv("PARENTS_PATH", "data/parents.jsonl"))
 # empty (no parents file). Lazy loading avoids reading a large file at import
 # time and keeps tests fast.
 _cache: dict[str, dict] | None = None
+
+# Callbacks fired after the cache is cleared, so caches derived from the parent
+# store (e.g. retrieve.py's BM25 index) invalidate in lockstep on a reload.
+_invalidation_hooks: list[Callable[[], None]] = []
+
+
+def register_invalidation_hook(hook: Callable[[], None]) -> None:
+    """Register a callback to run whenever clear_cache() resets the store.
+
+    Lets modules that derive state from parents (the BM25 index) drop their
+    own cache on a corpus reload, without parents.py importing them — keeping
+    the dependency one-directional.
+    """
+    _invalidation_hooks.append(hook)
 
 
 # Persistence
@@ -133,6 +149,12 @@ def get_all_parents(path: str | os.PathLike = PARENTS_PATH) -> list[dict]:
 
 
 def clear_cache() -> None:
-    """Reset the in-memory parents cache. Use after writes or in test setup."""
+    """Reset the in-memory parents cache. Use after writes or in test setup.
+
+    Fires any registered invalidation hooks so caches derived from the parent
+    store (the BM25 index) stay consistent with the reloaded corpus.
+    """
     global _cache
     _cache = None
+    for hook in _invalidation_hooks:
+        hook()

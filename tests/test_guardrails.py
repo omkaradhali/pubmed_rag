@@ -7,6 +7,7 @@ All tests are pure-logic, no disk I/O or LLM calls.
 import pytest
 
 from pubmed_rag.guardrails import (
+    LOW_OVERLAP_HARD_BLOCK_THRESHOLD,
     GuardrailCode,
     GuardrailError,
     GuardrailResult,
@@ -14,6 +15,7 @@ from pubmed_rag.guardrails import (
     check_faithfulness,
     check_injection,
     check_topic_relevance,
+    is_hard_block,
     run_input_guardrails,
     run_output_guardrails,
 )
@@ -363,3 +365,43 @@ class TestRunOutputGuardrails:
             run_output_guardrails(answer, [_CHUNK_EGFR])
         except Exception as exc:
             pytest.fail(f"run_output_guardrails raised unexpectedly: {exc}")
+
+
+# ── is_hard_block ────────────────────────────────────────────────────────────
+
+
+def _low_overlap_result(n_pairs: int) -> GuardrailResult:
+    """Build a LOW_CITATION_OVERLAP result carrying n low-overlap pairs."""
+    return GuardrailResult(
+        passed=False,
+        code=GuardrailCode.LOW_CITATION_OVERLAP,
+        reason="test",
+        detail={"low_overlap_pairs": [{"source_n": i} for i in range(n_pairs)]},
+    )
+
+
+class TestIsHardBlock:
+    def test_passed_result_is_never_a_hard_block(self):
+        assert is_hard_block(GuardrailResult(passed=True)) is False
+
+    def test_missing_citations_is_hard_block(self):
+        result = GuardrailResult(passed=False, code=GuardrailCode.MISSING_CITATIONS)
+        assert is_hard_block(result) is True
+
+    def test_citation_out_of_range_is_hard_block(self):
+        result = GuardrailResult(passed=False, code=GuardrailCode.CITATION_OUT_OF_RANGE)
+        assert is_hard_block(result) is True
+
+    def test_single_low_overlap_is_advisory_not_hard_block(self):
+        # One low-overlap pair may be a transition sentence — advisory only.
+        assert is_hard_block(_low_overlap_result(1)) is False
+
+    def test_low_overlap_at_threshold_is_hard_block(self):
+        assert is_hard_block(_low_overlap_result(LOW_OVERLAP_HARD_BLOCK_THRESHOLD)) is True
+
+    def test_low_overlap_above_threshold_is_hard_block(self):
+        assert is_hard_block(_low_overlap_result(LOW_OVERLAP_HARD_BLOCK_THRESHOLD + 1)) is True
+
+    def test_input_guardrail_codes_are_not_hard_blocks(self):
+        # is_hard_block governs the output/retry path only.
+        assert is_hard_block(GuardrailResult(passed=False, code=GuardrailCode.OFF_TOPIC)) is False

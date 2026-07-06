@@ -11,10 +11,14 @@ distance→score conversion, min_score filtering, parent-text resolution,
 dedup-by-parent_id, and result key shape.
 """
 
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pubmed_rag import parents as parents_module
+from pubmed_rag import retrieve as retrieve_module
 from pubmed_rag.retrieve import retrieve
 
 
@@ -328,3 +332,89 @@ class TestReranking:
         results = retrieve("query", n_results=1, rerank_enabled=False)
         assert len(results) == 1
         mock_deps["rerank"].assert_not_called()
+
+
+class TestBM25IndexThreadSafety:
+    """The lazy BM25 build is guarded by a lock (double-checked locking) because
+    FastAPI runs the pipeline in a thread pool. Concurrent cold-start callers
+    must build the index exactly once and all receive the same (index, parents).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_bm25_cache(self):
+        # Ensure every test starts cold, and leave the module clean afterwards.
+        retrieve_module._bm25_index = None
+        retrieve_module._bm25_parents = []
+        yield
+        retrieve_module._bm25_index = None
+        retrieve_module._bm25_parents = []
+
+    def test_concurrent_cold_start_builds_index_once(self):
+        n_threads = 8
+        parents = [{"text": "sample parent text", "chunk_id": "p0"}]
+
+        def slow_get_all_parents():
+            # Widen the race window so threads genuinely contend on the build.
+            time.sleep(0.05)
+            return parents
+
+        results: list[tuple] = []
+        barrier = threading.Barrier(n_threads)
+
+        with patch.object(
+            retrieve_module,
+            "get_all_parents",
+            side_effect=slow_get_all_parents,
+        ) as mock_get_parents:
+
+            def worker():
+                barrier.wait()  # line all threads up before the first call
+                results.append(retrieve_module._get_bm25_index())
+
+            threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        # Built exactly once despite concurrent cold-start callers.
+        assert mock_get_parents.call_count == 1
+        assert len(results) == n_threads
+        # Every caller received the identical (index, parents) objects.
+        first_index, first_parents = results[0]
+        assert all(idx is first_index for idx, _ in results)
+        assert all(prn is first_parents for _, prn in results)
+
+    def test_second_call_hits_fast_path_without_rebuild(self):
+        parents = [{"text": "sample parent text", "chunk_id": "p0"}]
+        with patch.object(
+            retrieve_module,
+            "get_all_parents",
+            return_value=parents,
+        ) as mock_get_parents:
+            index1, parents1 = retrieve_module._get_bm25_index()
+            index2, parents2 = retrieve_module._get_bm25_index()
+
+        mock_get_parents.assert_called_once()  # cached on the second call
+        assert index1 is index2
+        assert parents1 is parents2
+
+    def test_clear_cache_invalidates_bm25_index(self):
+        # A corpus reload (parents.clear_cache) must drop the stale index via the
+        # registered invalidation hook, so the next query rebuilds from fresh
+        # parents instead of serving mismatched documents.
+        first = [{"text": "old parent", "chunk_id": "p0"}]
+        second = [{"text": "new parent", "chunk_id": "p1"}]
+        with patch.object(
+            retrieve_module, "get_all_parents", side_effect=[first, second]
+        ) as mock_get_parents:
+            _, parents1 = retrieve_module._get_bm25_index()
+            assert parents1 is first
+
+            parents_module.clear_cache()  # fires _reset_bm25_cache hook
+            assert retrieve_module._bm25_index is None  # invalidated
+
+            _, parents2 = retrieve_module._get_bm25_index()
+            assert parents2 is second  # rebuilt from the reloaded corpus
+
+        assert mock_get_parents.call_count == 2
