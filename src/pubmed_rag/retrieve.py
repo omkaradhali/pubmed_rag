@@ -40,11 +40,16 @@ import json
 import logging
 import os
 import re
+import threading
 
 from rank_bm25 import BM25Okapi
 
 from pubmed_rag.embed import MODEL_NAME, embed_query
-from pubmed_rag.parents import get_all_parents, get_parent
+from pubmed_rag.parents import (
+    get_all_parents,
+    get_parent,
+    register_invalidation_hook,
+)
 from pubmed_rag.rerank import rerank
 from pubmed_rag.vectorstore import get_collection
 
@@ -110,8 +115,12 @@ _RE_BIOMARKER = re.compile(r"\b(?:MSI-[HL]|dMMR|pMMR|TMB|HER2|PD-L1|CTLA-4|PD-1|
 
 # BM25 module-level cache — built lazily on first hybrid query, then reused.
 # Invalidated whenever clear_cache() is called on the parents module.
+# _bm25_lock guards the lazy build: FastAPI runs the pipeline in a thread pool,
+# so concurrent cold-start requests could otherwise build competing indices and
+# leave _bm25_index / _bm25_parents mismatched.
 _bm25_index: BM25Okapi | None = None
 _bm25_parents: list[dict] = []
+_bm25_lock = threading.Lock()
 
 
 def _has_biomedical_entity(query: str) -> bool:
@@ -157,19 +166,48 @@ def _get_bm25_index() -> tuple["BM25Okapi", list[dict]]:
     term matching where exact spelling matters (drug names, gene symbols, IDs).
     """
     global _bm25_index, _bm25_parents
+    # Fast path: index already built. No lock needed — a non-None _bm25_index is
+    # only ever published together with its matching _bm25_parents (see below).
     if _bm25_index is not None:
         return _bm25_index, _bm25_parents
 
-    _bm25_parents = get_all_parents()
-    if not _bm25_parents:
-        _logger.warning("No parents loaded — BM25 index will be empty.")
-        _bm25_index = BM25Okapi([[]])
+    with _bm25_lock:
+        # Double-check inside the lock: another thread may have built the index
+        # while we waited to acquire it.
+        if _bm25_index is not None:
+            return _bm25_index, _bm25_parents
+
+        # Build into locals so a partially-built pair is never visible to the
+        # fast path; publish both globals atomically at the end.
+        parents = get_all_parents()
+        if not parents:
+            _logger.warning("No parents loaded — BM25 index will be empty.")
+            index = BM25Okapi([[]])
+        else:
+            tokenized = [p["text"].lower().split() for p in parents]
+            index = BM25Okapi(tokenized)
+            _logger.info("BM25 index built over %d parents.", len(parents))
+
+        _bm25_parents = parents
+        _bm25_index = index
         return _bm25_index, _bm25_parents
 
-    tokenized = [p["text"].lower().split() for p in _bm25_parents]
-    _bm25_index = BM25Okapi(tokenized)
-    _logger.info("BM25 index built over %d parents.", len(_bm25_parents))
-    return _bm25_index, _bm25_parents
+
+def _reset_bm25_cache() -> None:
+    """Drop the cached BM25 index so the next hybrid query rebuilds it.
+
+    Registered with parents.clear_cache() (below) so a corpus reload — via
+    save_parents/append_parents or a test's clear_cache — transparently
+    invalidates the index instead of serving parents that no longer match.
+    """
+    global _bm25_index, _bm25_parents
+    with _bm25_lock:
+        _bm25_index = None
+        _bm25_parents = []
+
+
+# Wire BM25 invalidation into the parent store's cache lifecycle at import time.
+register_invalidation_hook(_reset_bm25_cache)
 
 
 def _bm25_retrieve(query: str, n_results: int) -> list[dict]:
