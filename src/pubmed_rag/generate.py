@@ -48,6 +48,17 @@ _SYSTEM_PROMPT = (
     "Do not use any knowledge outside the provided context."
 )
 
+# Appended to the prompt on a retry after the first answer failed citation
+# validation (see pipeline._generate_grounded_answer). Explicit and corrective.
+CITATION_CORRECTION_INSTRUCTION = (
+    "Your previous answer failed citation validation. Rewrite it so that EVERY "
+    "factual claim is immediately followed by an inline citation in square "
+    "brackets, e.g. [1]. Cite ONLY the numbered sources above and never a number "
+    "outside their range. If the context does not support a grounded, cited "
+    "answer, respond with exactly: "
+    "'The retrieved literature does not address this question directly.'"
+)
+
 
 # Context formatting
 
@@ -82,23 +93,28 @@ def format_context(chunks: list[dict]) -> str:
 
 
 # Prompt assembly
-def build_prompt(query: str, context: str) -> str:
+def build_prompt(query: str, context: str, correction: str | None = None) -> str:
     """
     Assemble the full user-turn prompt from a query and formatted context block.
 
     Args:
-        query:   The user's natural language question.
-        context: Formatted context string from format_context().
+        query:      The user's natural language question.
+        context:    Formatted context string from format_context().
+        correction: Optional corrective instruction appended on a retry after
+                    citation validation failed (see CITATION_CORRECTION_INSTRUCTION).
 
     Returns:
         Complete user message string to send to the LLM.
     """
-    return (
+    prompt = (
         f"Question: {query}\n\n"
         f"Context:\n{context}\n\n"
         "Answer the question using only the above context. "
         "Cite each claim with the source number in square brackets, e.g. [1]."
     )
+    if correction:
+        prompt += f"\n\n{correction}"
+    return prompt
 
 
 # Provider-specific callers
@@ -184,7 +200,7 @@ def _call_openai(prompt: str) -> str:
 
 
 # Main entry point
-def generate_answer(query: str, chunks: list[dict]) -> str:
+def generate_answer(query: str, chunks: list[dict], correction: str | None = None) -> str:
     """
     Generate a citation-grounded answer for a query given retrieved chunks.
 
@@ -192,9 +208,11 @@ def generate_answer(query: str, chunks: list[dict]) -> str:
     prompt, and dispatches to the provider configured in LLM_PROVIDER.
 
     Args:
-        query:  Natural language question from the user.
-        chunks: Retrieved chunks from retrieve.py (list of dicts with pmid,
-                title, year, text keys).
+        query:      Natural language question from the user.
+        chunks:     Retrieved chunks from retrieve.py (list of dicts with pmid,
+                    title, year, text keys).
+        correction: Optional corrective instruction appended to the prompt on a
+                    retry after citation validation failed.
 
     Returns:
         LLM-generated answer string with inline [number] citations.
@@ -209,7 +227,7 @@ def generate_answer(query: str, chunks: list[dict]) -> str:
     provider = os.getenv("LLM_PROVIDER", _DEFAULT_PROVIDER)
 
     context = format_context(chunks)
-    prompt = build_prompt(query, context)
+    prompt = build_prompt(query, context, correction=correction)
 
     _logger.info("Generating answer via provider=%s ...", provider)
 

@@ -33,8 +33,13 @@ from dotenv import load_dotenv
 
 from pubmed_rag.chunk import chunk_records, load_and_chunk, split_parents_children
 from pubmed_rag.embed import embed_chunks, save_embeddings
-from pubmed_rag.generate import generate_answer
-from pubmed_rag.guardrails import run_input_guardrails, run_output_guardrails
+from pubmed_rag.generate import CITATION_CORRECTION_INSTRUCTION, generate_answer
+from pubmed_rag.guardrails import (
+    GuardrailResult,
+    is_hard_block,
+    run_input_guardrails,
+    run_output_guardrails,
+)
 from pubmed_rag.ingest import ingest, save_to_jsonl
 from pubmed_rag.parents import append_parents, save_parents
 from pubmed_rag.retrieve import retrieve
@@ -54,6 +59,13 @@ INGEST_QUERY = os.getenv("INGEST_QUERY", "oncology[Title/Abstract]")
 INGEST_MAX_RESULTS = int(os.getenv("INGEST_MAX_RESULTS", "500"))
 
 _SEP = "─" * 62
+
+# Returned to the caller when a grounded, properly-cited answer cannot be
+# produced even after one corrective retry. Never surface an uncited answer.
+SAFE_FALLBACK_ANSWER = (
+    "I was unable to produce a properly grounded answer for this question. "
+    "Please consult primary sources directly."
+)
 
 # Phrases that suggest the LLM couldn't find enough context
 _LOW_COVERAGE_PHRASES = (
@@ -244,6 +256,41 @@ def format_pipeline_output(result: PipelineResult, verbose: bool = False) -> str
 # Public API
 
 
+def _failed_flags(results: list[GuardrailResult]) -> list[dict]:
+    """Serialize the failed guardrail results (passed=False) as dicts."""
+    return [asdict(r) for r in results if not r.passed]
+
+
+def _generate_grounded_answer(query: str, chunks: list[dict]) -> tuple[str, list[dict], bool]:
+    """
+    Generate an answer, verify grounding, retry once, then hard-block if needed.
+
+    Runs output guardrails on the generated answer. If any failure is a hard
+    block (missing/invalid citations, or systemic low overlap), re-prompts the
+    LLM once with an explicit correction instruction. If the retry still hard-
+    blocks, returns the safe fallback instead of the ungrounded answer — an
+    uncited answer must never reach a clinical user.
+
+    Returns:
+        (answer, guardrail_flags, blocked) — guardrail_flags holds the failed
+        guardrail results (as dicts) from the final attempt; blocked is True
+        when the safe fallback was substituted.
+    """
+    answer = generate_answer(query, chunks)
+    results = run_output_guardrails(answer, chunks)
+    if not any(is_hard_block(r) for r in results):
+        return answer, _failed_flags(results), False
+
+    _logger.warning("Output guardrail hard-block on first attempt — retrying with correction.")
+    answer = generate_answer(query, chunks, correction=CITATION_CORRECTION_INSTRUCTION)
+    results = run_output_guardrails(answer, chunks)
+    if not any(is_hard_block(r) for r in results):
+        return answer, _failed_flags(results), False
+
+    _logger.error("Output guardrail hard-block persisted after retry — returning safe fallback.")
+    return SAFE_FALLBACK_ANSWER, _failed_flags(results), True
+
+
 def run_pipeline_structured(
     query: str,
     mode: str = "incremental",
@@ -282,15 +329,16 @@ def run_pipeline_structured(
     _logger.info("Retrieving top-%d chunks for: %r", n_results, query)
     chunks = retrieve(query, n_results=n_results, min_score=min_score)
 
-    answer = (
-        generate_answer(query, chunks)
-        if chunks
-        else "No relevant abstracts found in the current corpus for this query."
-    )
+    # Generate with grounding enforcement: retry once on a citation/faithfulness
+    # hard block, then substitute the safe fallback rather than surface an
+    # uncited answer. Remaining guardrail_flags are advisory (non-blocking).
+    if chunks:
+        answer, guardrail_flags, blocked = _generate_grounded_answer(query, chunks)
+    else:
+        answer = "No relevant abstracts found in the current corpus for this query."
+        guardrail_flags = []
+        blocked = False
     _logger.info("Generated answer (%d chars).", len(answer))
-
-    # Output guardrails — advisory warnings, never block the response.
-    guardrail_flags = [asdict(r) for r in run_output_guardrails(answer, chunks) if not r.passed]
 
     # Build sources
     sources = [
@@ -337,10 +385,19 @@ def run_pipeline_structured(
         if avg_score >= 0.50
         else "Low"
     )
+    # A blocked answer is the safe fallback, not a grounded result — retrieval
+    # scores must not make it look confident.
+    if blocked:
+        confidence_tier = "None"
 
     # Coverage note
     coverage_note = None
-    if any(phrase in answer.lower() for phrase in _LOW_COVERAGE_PHRASES):
+    if blocked:
+        coverage_note = (
+            "Answer withheld — the system could not produce a properly grounded, "
+            "cited answer for this query. Consult primary sources directly."
+        )
+    elif any(phrase in answer.lower() for phrase in _LOW_COVERAGE_PHRASES):
         coverage_note = (
             "Answer may be incomplete — corpus lacks sufficient coverage for this query."
         )

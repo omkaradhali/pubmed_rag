@@ -540,3 +540,30 @@ def run_output_guardrails(answer: str, chunks: list[dict]) -> list[GuardrailResu
         check_citations(answer, n_sources=len(chunks)),
         check_faithfulness(answer, chunks),
     ]
+
+
+# Minimum number of low-overlap cited claims before LOW_CITATION_OVERLAP is
+# treated as a systemic (hard-block) failure rather than an advisory warning.
+# A single low-overlap sentence may be a short transition; multiple is systemic.
+LOW_OVERLAP_HARD_BLOCK_THRESHOLD = 2
+
+
+def is_hard_block(result: GuardrailResult) -> bool:
+    """
+    Decide whether an output guardrail failure must hard-block the answer.
+
+    Hard blocks (vs. advisory flags) trigger the retry + safe-fallback path in
+    pipeline._generate_grounded_answer — an ungrounded answer must never reach a
+    clinical user:
+      * MISSING_CITATIONS / CITATION_OUT_OF_RANGE — always a hard block.
+      * LOW_CITATION_OVERLAP — a hard block only when at least
+        LOW_OVERLAP_HARD_BLOCK_THRESHOLD cited claims have low overlap.
+    """
+    if result.passed:
+        return False
+    if result.code in (GuardrailCode.MISSING_CITATIONS, GuardrailCode.CITATION_OUT_OF_RANGE):
+        return True
+    if result.code == GuardrailCode.LOW_CITATION_OVERLAP:
+        pairs = result.detail.get("low_overlap_pairs", [])
+        return len(pairs) >= LOW_OVERLAP_HARD_BLOCK_THRESHOLD
+    return False

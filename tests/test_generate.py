@@ -12,7 +12,12 @@ from unittest.mock import patch
 
 import pytest
 
-from pubmed_rag.generate import format_context, generate_answer
+from pubmed_rag.generate import (
+    CITATION_CORRECTION_INSTRUCTION,
+    build_prompt,
+    format_context,
+    generate_answer,
+)
 
 # Fixtures
 
@@ -151,3 +156,27 @@ def test_generate_answer_prompt_contains_context(monkeypatch, sample_chunks):
         prompt = mock.call_args[0][0]
         assert "11111111" in prompt
         assert "Pembrolizumab in MSI-H CRC" in prompt
+
+
+# build_prompt() — correction instruction (citation-retry path)
+def test_build_prompt_without_correction_has_no_correction_text():
+    prompt = build_prompt("What is EGFR?", "1. context text")
+    assert CITATION_CORRECTION_INSTRUCTION not in prompt
+
+
+def test_build_prompt_appends_correction_when_given():
+    prompt = build_prompt(
+        "What is EGFR?", "1. context text", correction=CITATION_CORRECTION_INSTRUCTION
+    )
+    assert CITATION_CORRECTION_INSTRUCTION in prompt
+    # The base instruction still precedes the correction.
+    assert prompt.index("Cite each claim") < prompt.index(CITATION_CORRECTION_INSTRUCTION)
+
+
+def test_generate_answer_forwards_correction_to_prompt(monkeypatch, sample_chunks):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    with patch("pubmed_rag.generate.build_prompt", wraps=build_prompt) as spy_build:
+        with patch("pubmed_rag.generate._call_ollama", return_value="ok [1]"):
+            generate_answer("Does pembrolizumab help?", sample_chunks, correction="FIXCITES")
+    # The correction argument reaches build_prompt unchanged.
+    assert spy_build.call_args.kwargs["correction"] == "FIXCITES"
