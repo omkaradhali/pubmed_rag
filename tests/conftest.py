@@ -29,6 +29,4 @@ def _stub_nli_scorer(monkeypatch):
     """
     from pubmed_rag import faithfulness_nli
 
-    monkeypatch.setattr(
-        faithfulness_nli, "contradiction_scores", lambda pairs: [0.0] * len(pairs)
-    )
+    monkeypatch.setattr(faithfulness_nli, "contradiction_scores", lambda pairs: [0.0] * len(pairs))
