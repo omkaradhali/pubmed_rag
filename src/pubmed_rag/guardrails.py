@@ -13,6 +13,7 @@ is still returned to the caller with the flags attached.
 
     check_citations(answer, n_sources)    -> GuardrailResult
     check_faithfulness(answer, chunks)    -> GuardrailResult
+    check_nli_faithfulness(answer, chunks)-> GuardrailResult
     run_output_guardrails(answer, chunks) -> list[GuardrailResult]
 """
 
@@ -21,6 +22,8 @@ import string
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from pubmed_rag import faithfulness_nli
+
 
 class GuardrailCode(StrEnum):
     OFF_TOPIC = "OFF_TOPIC"
@@ -28,6 +31,7 @@ class GuardrailCode(StrEnum):
     MISSING_CITATIONS = "MISSING_CITATIONS"
     CITATION_OUT_OF_RANGE = "CITATION_OUT_OF_RANGE"
     LOW_CITATION_OVERLAP = "LOW_CITATION_OVERLAP"
+    CONTRADICTS_SOURCE = "CONTRADICTS_SOURCE"
 
 
 @dataclass
@@ -528,6 +532,32 @@ def check_faithfulness(answer: str, chunks: list[dict]) -> GuardrailResult:
     return GuardrailResult(passed=True)
 
 
+def check_nli_faithfulness(answer: str, chunks: list[dict]) -> GuardrailResult:
+    """
+    NLI faithfulness check: does any cited claim contradict its source?
+
+    Second faithfulness pass after the lexical check_faithfulness. Where Jaccard
+    overlap is blind to negation ("is effective" vs "is not effective") and
+    entity swaps ("tachycardia" vs "bradycardia") — the tokens barely change —
+    a natural-language-inference cross-encoder reads the two together and scores
+    P(contradiction). Fails when any cited sentence is contradicted by chunk N
+    above faithfulness_nli.CONTRADICTION_THRESHOLD.
+
+    The model is lazy-loaded on first use (see faithfulness_nli); this returns a
+    passing result immediately when there is nothing cited to check.
+    """
+    contradictions = faithfulness_nli.find_contradictions(answer, chunks)
+    if not contradictions:
+        return GuardrailResult(passed=True)
+
+    return GuardrailResult(
+        passed=False,
+        code=GuardrailCode.CONTRADICTS_SOURCE,
+        reason="One or more cited claims are contradicted by their cited source.",
+        detail={"contradictions": contradictions},
+    )
+
+
 def run_output_guardrails(answer: str, chunks: list[dict]) -> list[GuardrailResult]:
     """
     Run all output guardrails. Returns all results (passed and failed).
@@ -539,6 +569,7 @@ def run_output_guardrails(answer: str, chunks: list[dict]) -> list[GuardrailResu
     return [
         check_citations(answer, n_sources=len(chunks)),
         check_faithfulness(answer, chunks),
+        check_nli_faithfulness(answer, chunks),
     ]
 
 
@@ -556,12 +587,19 @@ def is_hard_block(result: GuardrailResult) -> bool:
     pipeline._generate_grounded_answer — an ungrounded answer must never reach a
     clinical user:
       * MISSING_CITATIONS / CITATION_OUT_OF_RANGE — always a hard block.
+      * CONTRADICTS_SOURCE — always a hard block. A single high-confidence NLI
+        contradiction (e.g. a negated or entity-swapped claim) is severe, unlike
+        the noisier lexical-overlap signal.
       * LOW_CITATION_OVERLAP — a hard block only when at least
         LOW_OVERLAP_HARD_BLOCK_THRESHOLD cited claims have low overlap.
     """
     if result.passed:
         return False
-    if result.code in (GuardrailCode.MISSING_CITATIONS, GuardrailCode.CITATION_OUT_OF_RANGE):
+    if result.code in (
+        GuardrailCode.MISSING_CITATIONS,
+        GuardrailCode.CITATION_OUT_OF_RANGE,
+        GuardrailCode.CONTRADICTS_SOURCE,
+    ):
         return True
     if result.code == GuardrailCode.LOW_CITATION_OVERLAP:
         pairs = result.detail.get("low_overlap_pairs", [])

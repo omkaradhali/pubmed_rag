@@ -23,6 +23,14 @@ def _passing() -> GuardrailResult:
     return GuardrailResult(passed=True)
 
 
+def _contradicts_source() -> GuardrailResult:
+    return GuardrailResult(
+        passed=False,
+        code=GuardrailCode.CONTRADICTS_SOURCE,
+        detail={"contradictions": [{"source_n": 1, "contradiction": 0.95}]},
+    )
+
+
 def _low_overlap(n_pairs: int) -> GuardrailResult:
     return GuardrailResult(
         passed=False,
@@ -83,6 +91,25 @@ class TestGenerateGroundedAnswer:
         assert gen.call_count == 2  # exactly one retry, no infinite loop
         # The blocking failure is still reported in the flags.
         assert any(f["code"] == GuardrailCode.MISSING_CITATIONS for f in flags)
+
+    def test_nli_contradiction_triggers_retry_then_fallback(self):
+        # An NLI contradiction is a hard block: retry once, then safe fallback.
+        with (
+            patch(
+                "pubmed_rag.pipeline.generate_answer",
+                side_effect=["Drug is not effective [1].", "Still contradicts [1]."],
+            ) as gen,
+            patch(
+                "pubmed_rag.pipeline.run_output_guardrails",
+                side_effect=[[_contradicts_source()], [_contradicts_source()]],
+            ),
+        ):
+            answer, flags, blocked = _generate_grounded_answer("q", _CHUNKS)
+
+        assert answer == SAFE_FALLBACK_ANSWER
+        assert blocked is True
+        assert gen.call_count == 2
+        assert any(f["code"] == GuardrailCode.CONTRADICTS_SOURCE for f in flags)
 
     def test_advisory_only_failure_does_not_trigger_retry(self):
         # A single low-overlap pair is advisory, not a hard block — the answer
