@@ -42,6 +42,7 @@ from pubmed_rag.guardrails import (
 )
 from pubmed_rag.ingest import ingest, save_to_jsonl
 from pubmed_rag.parents import append_parents, save_parents
+from pubmed_rag.phi import scrub_phi
 from pubmed_rag.retrieve import retrieve
 from pubmed_rag.vectorstore import get_collection, seed_collection, upsert_chunks
 
@@ -80,8 +81,6 @@ _LOW_COVERAGE_PHRASES = (
 
 
 # Data classes
-
-
 @dataclass
 class SourceChunk:
     """
@@ -161,8 +160,6 @@ class PipelineResult:
 
 
 # Output formatting
-
-
 def format_pipeline_output(result: PipelineResult, verbose: bool = False) -> str:
     """
     Render a PipelineResult as a human-readable string for CLI output.
@@ -254,8 +251,6 @@ def format_pipeline_output(result: PipelineResult, verbose: bool = False) -> str
 
 
 # Public API
-
-
 def _failed_flags(results: list[GuardrailResult]) -> list[dict]:
     """Serialize the failed guardrail results (passed=False) as dicts."""
     return [asdict(r) for r in results if not r.passed]
@@ -315,7 +310,15 @@ def run_pipeline_structured(
         PipelineResult with all fields populated.
     """
     # Input guardrails — raises GuardrailError on failure; caller handles it.
+    # Run on the RAW query: topic-relevance and injection checks want the
+    # original text before any de-identification rewrites it.
     run_input_guardrails(query)
+
+    # PHI/PII scrubbing — de-identify once here, before retrieval, so the same
+    # scrubbed query reaches the embedder (openai embedding is a cloud egress
+    # path), the generation prompt, and the audit log. No-op on a fully local
+    # stack (ollama + local embeddings).
+    query = scrub_phi(query)
 
     if mode == "full":
         _logger.info("Mode: full — rebuilding corpus from scratch.")
@@ -461,8 +464,6 @@ def run_pipeline(
 
 
 # Private helpers
-
-
 def _run_full_ingest(reldate: int | None = None) -> None:
     """Wipe existing corpus and rebuild: ingest → chunk → save parents → embed children → seed."""
     for path in (ABSTRACTS_PATH, EMBEDDINGS_PATH, PARENTS_PATH):
@@ -539,7 +540,6 @@ def _run_incremental_update(reldate: int) -> None:
 
 
 # CLI entrypoint
-
 if __name__ == "__main__":
     import argparse
 

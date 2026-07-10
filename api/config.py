@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     # Hybrid retrieval — BM25 + dense → RRF fusion (v0.2, Day 23)
     hybrid_search_enabled: bool = False
 
+    # PHI/PII scrubbing (Session C, Tier 1) — de-identify queries before any
+    # cloud egress. "auto" scrubs only when a cloud provider is configured (LLM
+    # anthropic/haiku/sonnet/openai or EMBEDDING_PROVIDER=openai); "on" always
+    # scrubs; "off" never scrubs (not for clinical use). Runtime gate reads the
+    # env var directly (pipeline.py style); this field keeps .env discoverable.
+    phi_scrubbing: str = "auto"
+    phi_spacy_model: str = "en_core_web_lg"
+
     # LLM provider — ollama (default), anthropic, haiku, sonnet, openai
     llm_provider: str = "ollama"
     llm_model: str = "llama3.1:8b"
