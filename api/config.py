@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # API server
     log_level: str = "INFO"
 
+    # Audit log — append-only JSONL record of every clinical query (Session D, Tier 1).
+    # One immutable line per query: request_id, timestamp, post-scrub query, retrieved
+    # PMIDs, model, truncated answer, guardrail results, confidence tier. Distinct from
+    # app logs (debug, rotatable); this is the compliance/accountability trail.
+    audit_log_path: str = "./data/audit.jsonl"
+    audit_answer_max_chars: int = 500
+
     # Auth — comma-separated static API keys. Empty = auth disabled (safe for local dev).
     # Stored as a raw string so pydantic-settings doesn't try to JSON-decode it.
     # Parsed into a list inside verify_api_key (api/dependencies.py).
