@@ -66,6 +66,22 @@ Without a free NCBI API key, the ingestion pipeline is capped at 3 requests/seco
 ### Ollama must be running
 When `LLM_PROVIDER=ollama` (the default), the Ollama service must be reachable at `OLLAMA_BASE_URL`. If Ollama is not running, all `/ask` calls will fail with a 500 error. Set `LLM_PROVIDER=anthropic` or `LLM_PROVIDER=openai` with the corresponding API key to remove the local dependency.
 
+### PHI scrubbing scope (cloud egress only)
+Query de-identification (`PHI_SCRUBBING`, powered by Microsoft Presidio) runs only when a cloud provider is configured — `LLM_PROVIDER` is not `ollama`, or `EMBEDDING_PROVIDER` is not a local embedder (`miniml`/`medcpt`). A fully local stack does not scrub, because no text leaves the server. The gate is fail-safe: any unrecognized provider is treated as cloud and scrubbed.
+
+Scrubbing covers names, calendar dates (with a day), MRNs (near a cue word), phone numbers, SSNs, email addresses, IP addresses, URLs, and locations. It is **best-effort defense in depth, not a HIPAA Safe Harbor guarantee.** Known gaps, in rough order of likelihood:
+
+- **Two-component numeric dates** (`10/14`, `5/10`) are not scrubbed — they collide with dosing and ratios, so the recognizer requires a full date (a numeric triple, or a month name with a day). Conversely a triple like a version or schedule string (`10.10.10`) may be over-scrubbed as a date.
+- **Month/year with no day** (`May 1960`) is left intact as a likely literature reference; a date of birth written that way would survive.
+- **Ages over 89 and very old years** (`92-year-old`, a `1932` birth year) are not scrubbed. HIPAA Safe Harbor requires removing these; the tool preserves standalone years to keep publication references usable.
+- **Alphanumeric MRNs** (`U1234567`, `M-12345`) and cue words beyond `mrn/medical/record/chart` (e.g. `account`, `encounter`) are not matched; a purely numeric MRN needs an adjacent cue word to be caught at all.
+- **Zip codes and street addresses** rely on the spaCy `LOCATION` model, which is unreliable on standalone addresses without sentence context. Device serial numbers are not covered.
+- **Lowercase names** (`pt john doe`) are frequently missed by the NER model, which weights capitalization heavily.
+- **Eponyms and named syndromes** (`Hodgkin`, `Li-Fraumeni`) may occasionally be flagged as `PERSON` and redacted, weakening retrieval.
+- **Indirect / re-identifying details** — a treating physician or facility (`Dr. Smith`, `Dana-Farber`) combined with a rare diagnosis can be identifying even when no direct identifier remains.
+
+For any workflow that may involve real patient data, run the fully local stack (`ollama` + `miniml`/`medcpt`). Do not treat scrubbing as a substitute for a Business Associate Agreement or for avoiding PHI in queries. See `SECURITY.md`.
+
 ---
 
 ## Not Limitations — Common Misunderstandings
