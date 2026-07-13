@@ -3,8 +3,11 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from api.audit import build_audit_record, write_audit_record
+from api.config import get_settings
 from api.dependencies import verify_api_key
 from api.limiter import limiter
+from api.logging_config import request_id_var
 from api.schemas import AskRequest, AskResponse, GuardrailFlagResponse, SourceChunkResponse
 from pubmed_rag.guardrails import GuardrailError
 from pubmed_rag.pipeline import run_pipeline_structured
@@ -60,7 +63,31 @@ async def ask(
     When set, the LLM detected it could not fully answer from the available context.
     Consider running with `mode=full` or `reldate=N` to refresh the corpus.
     """
-    logger.info("received query", extra={"query": body.query, "mode": body.mode})
+    # Do not log the raw query: application logs are the one sink that isn't
+    # PHI-scrubbed, so keep the clinician's text out of them. request_id ties this
+    # line back to the audit record if correlation is needed.
+    logger.info("received query", extra={"mode": body.mode})
+    settings = get_settings()
+
+    async def _audit(status: str, *, result=None, guardrail_results=None) -> None:
+        """Emit one immutable audit record for this handler exit path.
+
+        Best-effort: assembling *or* writing the record must never turn a
+        clinical query into a 500, so the whole body is guarded and the blocking
+        write is offloaded off the event loop via ``asyncio.to_thread``.
+        """
+        try:
+            record = build_audit_record(
+                request_id=request_id_var.get(),
+                query=body.query,
+                status=status,
+                result=result,
+                guardrail_results=guardrail_results,
+                answer_max_chars=settings.audit_answer_max_chars,
+            )
+            await asyncio.to_thread(write_audit_record, record, settings.audit_log_path)
+        except Exception:
+            logger.exception("failed to emit audit record")
 
     try:
         result = await asyncio.to_thread(
@@ -76,13 +103,20 @@ async def ask(
             "input guardrail rejected query",
             extra={"code": exc.result.code, "reason": exc.result.reason},
         )
+        await _audit(
+            "guardrail_rejected",
+            guardrail_results=[{"code": str(exc.result.code), "reason": exc.result.reason}],
+        )
         raise HTTPException(
             status_code=422,
             detail={"code": str(exc.result.code), "reason": exc.result.reason},
         ) from exc
     except Exception as exc:
         logger.exception("pipeline error")
+        await _audit("error")
         raise HTTPException(status_code=500, detail="Pipeline error") from exc
+
+    await _audit("success", result=result)
 
     return AskResponse(
         query=result.query,
