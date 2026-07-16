@@ -142,8 +142,12 @@ class TestAsk:
     def test_n_results_above_max_returns_422(self):
         assert client.post("/ask", json={"query": "test", "n_results": 21}).status_code == 422
 
-    def test_invalid_mode_returns_422(self):
-        assert client.post("/ask", json={"query": "test", "mode": "invalid"}).status_code == 422
+    def test_corpus_mutating_fields_rejected(self):
+        # /ask is read-only: the corpus-mutating "mode" and "reldate" fields were
+        # removed and extra fields are forbidden, so a client cannot trigger a
+        # destructive rebuild through a query. Both must be rejected with 422.
+        assert client.post("/ask", json={"query": "test", "mode": "full"}).status_code == 422
+        assert client.post("/ask", json={"query": "test", "reldate": 30}).status_code == 422
 
     def test_min_score_out_of_range_returns_422(self):
         assert client.post("/ask", json={"query": "test", "min_score": 1.5}).status_code == 422

@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,30 +20,24 @@ class HealthResponse(BaseModel):
 
 
 class AskRequest(BaseModel):
+    # forbid unknown fields so a client sending a removed/unsupported field
+    # (e.g. a corpus-mutating "mode" or "reldate") gets an explicit 422 rather
+    # than having it silently ignored. /ask is a read-only query endpoint;
+    # corpus rebuilds are an operator task run via the pipeline CLI.
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "query": "What are the treatments for HER2-positive metastatic breast cancer?",
-                "mode": "incremental",
                 "n_results": 5,
                 "min_score": 0.0,
-                "reldate": None,
             }
-        }
+        },
     )
 
     query: str = Field(
         description="The clinical question to answer.",
         examples=["What are the treatments for HER2-positive metastatic breast cancer?"],
-    )
-    mode: Literal["incremental", "full"] = Field(
-        default="incremental",
-        description=(
-            "Pipeline mode. "
-            '"incremental" (default) — queries the existing corpus, fast (~1-3 sec). '
-            '"full" — wipes and rebuilds the corpus from scratch before querying, slow (~2-5 min). '
-            "Use incremental for all normal queries."
-        ),
     )
     n_results: int = Field(
         default=5,
@@ -62,14 +56,6 @@ class AskRequest(BaseModel):
             "Minimum cosine similarity threshold [0.0-1.0]. "
             "Chunks scoring below this value are excluded from the context. "
             "0.0 returns all top-k chunks regardless of relevance score."
-        ),
-    )
-    reldate: int | None = Field(
-        default=None,
-        description=(
-            "Only applies when mode=incremental. "
-            "If set, fetches abstracts published in the last N days and upserts them "
-            "into the corpus before querying. Leave null to skip corpus update."
         ),
     )
 
