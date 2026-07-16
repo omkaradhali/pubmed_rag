@@ -2,8 +2,8 @@
 vectorstore.py — Seed and query a ChromaDB collection from embeddings.jsonl.
 
 Loads embedded child chunks from JSONL and upserts them into a persistent
-ChromaDB collection keyed by chunk_id (e.g. "41980200_p0_c2", D-042). Seeding
-is idempotent — running it twice overwrites existing IDs in place.
+ChromaDB collection keyed by chunk_id (e.g. "41980200_p0_c2"). Seeding is
+idempotent — running it twice overwrites existing IDs in place.
 
 Only CHILD chunks live in ChromaDB. Parents are persisted by parents.py to a
 sidecar JSONL and resolved at retrieval time. The vectorstore enforces this
@@ -128,8 +128,8 @@ def _chunk_to_metadata(c: dict) -> dict:
     List fields are serialized with json.dumps and deserialized in retrieve.py.
     Scalar fields fall back to "" so metadata is always complete.
 
-    v0.2 (D-042) adds chunk_id, chunk_role, parent_id so retrieve.py can
-    look up the parent text and dedup hits by parent_id.
+    The chunk_id, chunk_role, and parent_id fields let retrieve.py look up the
+    parent text and dedup hits by parent_id.
     """
     return {
         # Scalar identifiers
@@ -141,8 +141,8 @@ def _chunk_to_metadata(c: dict) -> dict:
         "pmc_id": c.get("pmc_id", ""),
         "pmc_url": c.get("pmc_url", ""),
         "journal": c.get("journal", ""),
-        # Parent-child schema (v0.2). chunk_role is always "child" in ChromaDB
-        # but stored explicitly to keep metadata self-describing for debugging.
+        # Parent-child schema. chunk_role is always "child" in ChromaDB but
+        # stored explicitly to keep metadata self-describing for debugging.
         "chunk_id": c.get("chunk_id", ""),
         "chunk_role": c.get("chunk_role", "child"),
         "parent_id": c.get("parent_id", ""),
@@ -150,7 +150,7 @@ def _chunk_to_metadata(c: dict) -> dict:
         "authors": json.dumps(c.get("authors", [])),
         "publication_types": json.dumps(c.get("publication_types", [])),
         "mesh_terms": json.dumps(c.get("mesh_terms", [])),
-        # Chunk position (within the parent — v0.2)
+        # Chunk position within the parent
         "chunk_index": c.get("chunk_index", 0),
         "chunk_total": c.get("chunk_total", 1),
     }
@@ -165,8 +165,8 @@ def upsert_chunks(chunks: list[dict]) -> int:
     incremental updates where chunks are already in memory (no JSONL write).
 
     Defensive filter: any non-child chunks are dropped with a warning. The
-    embed step should have removed them already (D-042 sub-decision 4) — this
-    guard catches mistakes by callers that bypass embed_chunks.
+    embed step should have removed them already (only children are embedded) —
+    this guard catches mistakes by callers that bypass embed_chunks.
 
     Args:
         chunks: List of embedded chunk dicts (output of embed.embed_chunks).

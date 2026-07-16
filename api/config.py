@@ -30,15 +30,15 @@ class Settings(BaseSettings):
     # Embedding provider — miniml (default, local), medcpt (biomedical, local), openai (production)
     embedding_provider: str = "miniml"
 
-    # Reranker — cross-encoder second stage (v0.2, Day 18)
+    # Reranker — cross-encoder second retrieval stage
     rerank_enabled: bool = True
     rerank_model: str = "ncbi/MedCPT-Cross-Encoder"
     rerank_pool: int = 30  # child candidates shortlisted before reranking
 
-    # Hybrid retrieval — BM25 + dense → RRF fusion (v0.2, Day 23)
+    # Hybrid retrieval — BM25 + dense → RRF fusion
     hybrid_search_enabled: bool = False
 
-    # PHI/PII scrubbing (Session C, Tier 1) — de-identify queries before any
+    # PHI/PII scrubbing — de-identify queries before any
     # cloud egress. "auto" scrubs only when a cloud provider is configured (LLM
     # anthropic/haiku/sonnet/openai or EMBEDDING_PROVIDER=openai); "on" always
     # scrubs; "off" never scrubs (not for clinical use). Runtime gate reads the
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     # Ingestion
     ingest_batch_size: int = 500
 
-    # Observability — leave empty to disable (Phase 2)
+    # Observability — leave empty to disable
     logfire_token: str = ""
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     # API server
     log_level: str = "INFO"
 
-    # Audit log — append-only JSONL record of every clinical query (Session D, Tier 1).
+    # Audit log — append-only JSONL record of every clinical query.
     # One immutable line per query: request_id, timestamp, post-scrub query, retrieved
     # PMIDs, model, truncated answer, guardrail results, confidence tier. Distinct from
     # app logs (debug, rotatable); this is the compliance/accountability trail.

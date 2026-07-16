@@ -1,5 +1,5 @@
 """
-rerank.py — Cross-encoder reranking of retrieved children (v0.2, Day 18).
+rerank.py — Cross-encoder reranking of retrieved children.
 
 Second retrieval stage. The first stage (retrieve.py) uses the bi-encoder from
 embed.py to cheaply shortlist a POOL of candidate child chunks. This module
@@ -17,9 +17,10 @@ Why a cross-encoder beats the bi-encoder score it reorders:
     the whole corpus. Hence two stages: cheap bi-encoder to shortlist, costly
     cross-encoder to order the shortlist.
 
-This is the lever that most directly targets RAGAS context_precision, which is
-an order-dependent metric (a relevant chunk buried below an irrelevant one
-tanks the score). See the Day 18 research synthesis.
+This most directly targets context precision — an order-dependent retrieval
+metric where a relevant chunk buried below an irrelevant one tanks the score.
+Reordering the shortlist so the most relevant chunks sit at the top is exactly
+what this stage buys.
 
 Model: ncbi/MedCPT-Cross-Encoder (default) — a PubMedBERT cross-encoder trained
 on 255M PubMed search-log query-article pairs. Purpose-built for reranking

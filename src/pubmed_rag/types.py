@@ -6,7 +6,7 @@ Importing this module has no side effects and no external dependencies.
 
 from typing import Literal, NotRequired, Required, TypedDict
 
-# Parent/child chunking (v0.2, see D-042)
+# Parent/child chunking
 #
 # Parent chunks (~1200 tokens, paragraph/section-aware) are stored in a sidecar
 # JSONL on disk and looked up at retrieval time to give the LLM full context.
@@ -38,7 +38,7 @@ class Chunk(TypedDict, total=False):
     chunk_index: Required[int]
     chunk_total: Required[int]
 
-    # v0.2 parent-child schema (D-042)
+    # Parent-child schema fields
     chunk_id: Required[str]  # stable unique ID, see ID scheme below
     chunk_role: Required[ChunkRole]  # "parent" or "child"
     parent_id: Required[str | None]  # None for parents; parent chunk_id for children

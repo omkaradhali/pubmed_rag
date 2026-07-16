@@ -1,6 +1,6 @@
 # Known Limitations
 
-This document captures the known constraints of pubmed_rag v0.2. Understanding these before deployment prevents surprises in production.
+This document captures the known constraints of pubmed_rag v1.0. Understanding these before deployment prevents surprises in production.
 
 ---
 
@@ -57,8 +57,8 @@ The 97-question labeled benchmark was generated from the same 5,000-abstract cor
 
 ## API and Security
 
-### No authentication in v0.2
-The `/ask` and `/cds-services` endpoints have no authentication. Do not expose the API publicly without completing the Day 29 auth + rate-limiting milestone (`slowapi` + static API key). See `SECURITY.md` for guidance.
+### Authentication is opt-in and disabled by default
+The API ships with static API-key authentication (`X-API-Key` header) and per-IP rate limiting (`slowapi`, 10 requests/hour on `/ask`). Authentication is **disabled by default** — when `API_KEYS` is empty, `/ask` and `/cds-services` accept unauthenticated requests, which is convenient for local development but unsafe on a public network. Set `API_KEYS` to one or more comma-separated keys before exposing the API. The key scheme is intentionally simple (static shared keys, no per-user identity, no rotation); richer auth (OAuth/OIDC, per-user scopes) is out of scope for v1.0. See `SECURITY.md` for guidance.
 
 ### Rate limit: NCBI without an API key
 Without a free NCBI API key, the ingestion pipeline is capped at 3 requests/second. Large corpus builds (`--mode full`, 5,000+ abstracts) will be throttled. Register at [https://www.ncbi.nlm.nih.gov/account/](https://www.ncbi.nlm.nih.gov/account/) and set `NCBI_API_KEY` to raise the limit to 10 req/s.

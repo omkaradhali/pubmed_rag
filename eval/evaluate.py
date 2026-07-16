@@ -309,8 +309,8 @@ def score_dataset(dataset: Dataset, llm):
         run_config=run_config,
     )
     df = result.to_pandas()
-    # ragas 0.4.x renames the input columns on output; map back to legacy
-    # names so print_results, save_csv, and v0.1-shaped CSVs stay consistent.
+    # ragas 0.4.x renames the input columns on output; map back to the original
+    # names so print_results, save_csv, and existing CSVs stay consistent.
     df = df.rename(
         columns={
             "user_input": "question",

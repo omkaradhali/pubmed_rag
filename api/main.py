@@ -1,3 +1,11 @@
+"""
+main.py — FastAPI application factory for the pubmed_rag HTTP API.
+
+Wires together configuration, JSON logging, per-request ID tracing, CORS, rate
+limiting, and the health / ask / CDS Hooks routers. Import `app` from here to
+run the server (e.g. `uvicorn api.main:app`).
+"""
+
 import logging
 import uuid
 from contextlib import asynccontextmanager

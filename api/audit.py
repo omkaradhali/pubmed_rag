@@ -1,4 +1,4 @@
-"""Immutable audit trail for clinical queries (Session D, Tier 1).
+"""Immutable audit trail for clinical queries.
 
 Each audited exit path of ``POST /ask`` produces one append-only JSONL record —
 whether the query succeeded, was rejected by an input guardrail, or errored inside
@@ -84,9 +84,14 @@ def build_audit_record(
 
     Note:
         On the success path ``query`` is the post-scrub query (PHI removed before
-        any cloud egress). On the guardrail/error paths the pipeline raised before
-        scrubbing, so the raw query is recorded — acceptable because the audit
-        file is a local sink, never sent to a cloud provider.
+        any cloud egress). On the guardrail-rejected path the pipeline raised in
+        the input guardrails, before scrubbing, so the raw query is recorded. On
+        the generic error path the failure may occur *after* scrubbing (retrieval
+        or LLM call), but the handler has no ``result`` to read the scrubbed query
+        from, so the raw ``query`` is recorded there too. Recording the raw query
+        is acceptable only because the audit file is a local, owner-only sink
+        (0o600) that is never sent to a cloud provider. Threading the scrubbed
+        query out of a failed pipeline run is deferred to v2.0.
     """
     record: dict[str, Any] = {
         "request_id": request_id,
