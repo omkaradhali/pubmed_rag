@@ -41,7 +41,7 @@ _logger = logging.getLogger(__name__)
 _DEFAULT_EVAL_MODEL = "claude-haiku-4-5-20251001"
 
 
-# ── LLM builder ───────────────────────────────────────────────────────────────
+# LLM builder
 
 
 def build_evaluator_llm():
@@ -61,13 +61,13 @@ def build_evaluator_llm():
     return LangchainLLMWrapper(chat)
 
 
-# ── Evaluation question set ────────────────────────────────────────────────────
+# Evaluation question set
 # 20 questions spanning 5 types x multiple cancer types.
 # ground_truth: short factual reference (1-2 sentences) — used by context_precision only.
 # faithfulness + answer_relevancy are reference-free (no ground_truth needed).
 
 EVAL_QUESTIONS: list[dict[str, str]] = [
-    # ── Mechanism (4) ──────────────────────────────────────────────────────────
+    # Mechanism (4)
     {
         "question": "How does PD-1/PD-L1 checkpoint inhibition restore anti-tumor immunity?",
         "ground_truth": (
@@ -96,7 +96,7 @@ EVAL_QUESTIONS: list[dict[str, str]] = [
             "instability and sensitivity to PARP inhibitors."
         ),
     },
-    # ── Biomarker (4) ──────────────────────────────────────────────────────────
+    # Biomarker (4)
     {
         "question": "Which biomarkers predict response to immune checkpoint inhibitors in solid tumors?",
         "ground_truth": (
@@ -125,7 +125,7 @@ EVAL_QUESTIONS: list[dict[str, str]] = [
             "T cell recognition, and improved response to immune checkpoint inhibitors."
         ),
     },
-    # ── Prognosis (4) ──────────────────────────────────────────────────────────
+    # Prognosis (4)
     {
         "question": "What is the approximate 5-year survival rate for stage III colorectal cancer?",
         "ground_truth": (
@@ -154,7 +154,7 @@ EVAL_QUESTIONS: list[dict[str, str]] = [
             "advanced stage, when curative resection is often no longer possible."
         ),
     },
-    # ── Treatment (5) ──────────────────────────────────────────────────────────
+    # Treatment (5)
     {
         "question": (
             "What is the current first-line treatment for advanced non-small cell lung cancer "
@@ -193,7 +193,7 @@ EVAL_QUESTIONS: list[dict[str, str]] = [
             "the standard first-line treatment, with CAR-T therapy for relapsed/refractory disease."
         ),
     },
-    # ── Epidemiology / Other (3) ───────────────────────────────────────────────
+    # Epidemiology / Other (3)
     {
         "question": "What are the major risk factors for pancreatic cancer?",
         "ground_truth": (
@@ -218,7 +218,7 @@ EVAL_QUESTIONS: list[dict[str, str]] = [
 ]
 
 
-# ── Step 1: run_single ────────────────────────────────────────────────────────
+# Step 1: run_single
 
 
 def run_single(question: str, ground_truth: str) -> dict:
@@ -245,7 +245,7 @@ def run_single(question: str, ground_truth: str) -> dict:
     }
 
 
-# ── Step 2: build_dataset ─────────────────────────────────────────────────────
+# Step 2: build_dataset
 
 
 def build_dataset(rows: list[dict]) -> Dataset:
@@ -262,7 +262,7 @@ def build_dataset(rows: list[dict]) -> Dataset:
     return Dataset.from_list(rows)
 
 
-# ── Step 3: score_dataset ─────────────────────────────────────────────────────
+# Step 3: score_dataset
 
 
 def score_dataset(dataset: Dataset, llm):
@@ -329,7 +329,7 @@ def score_dataset(dataset: Dataset, llm):
     return df
 
 
-# ── Step 4: print_results ─────────────────────────────────────────────────────
+# Step 4: print_results
 
 
 def print_results(df) -> None:
@@ -365,7 +365,7 @@ def print_results(df) -> None:
     print()
 
 
-# ── Step 5: save_csv ──────────────────────────────────────────────────────────
+# Step 5: save_csv
 
 
 def save_csv(df, path: Path) -> None:
@@ -380,7 +380,7 @@ def save_csv(df, path: Path) -> None:
     _logger.info("Results saved to %s", path)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main
 
 
 def main() -> None:

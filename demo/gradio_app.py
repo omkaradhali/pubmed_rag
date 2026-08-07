@@ -27,14 +27,14 @@ _EXAMPLE_QUERIES = [
 ]
 
 _CSS = """
-/* ── Global ─────────────────────────────────────────────── */
+/* Global */
 .gradio-container {
     max-width: 860px !important;
     margin: 0 auto !important;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
 }
 
-/* ── Banner ──────────────────────────────────────────────── */
+/* Banner */
 .pubmed-banner {
     background: linear-gradient(135deg, #0f4c81 0%, #1565c0 60%, #1a73b8 100%);
     border-radius: 12px;
@@ -67,7 +67,7 @@ _CSS = """
 }
 
 
-/* ── Answer card — force all text dark regardless of theme ── */
+/* Answer card — force all text dark regardless of theme */
 #answer-panel,
 #answer-panel *,
 #answer-panel p,
@@ -80,7 +80,7 @@ _CSS = """
 }
 #answer-panel strong, #answer-panel b { color: #111827 !important; }
 
-/* ── Query input ─────────────────────────────────────────── */
+/* Query input */
 #query-input textarea {
     font-size: 0.96rem !important;
     line-height: 1.6 !important;
@@ -97,7 +97,7 @@ _CSS = """
     outline: none !important;
 }
 
-/* ── Suggested question chips ────────────────────────────── */
+/* Suggested question chips */
 .chips-row {
     display: flex !important;
     flex-wrap: wrap !important;
@@ -125,7 +125,7 @@ _CSS = """
     border-color: #93c5fd !important;
 }
 
-/* ── Buttons ─────────────────────────────────────────────── */
+/* Buttons */
 #ask-btn button {
     background: #2563eb !important;
     color: white !important;
@@ -145,7 +145,7 @@ _CSS = """
     font-size: 0.88rem !important;
 }
 
-/* ── Answer card ─────────────────────────────────────────── */
+/* Answer card */
 #answer-panel {
     border-left: 4px solid #2563eb !important;
     border-radius: 0 8px 8px 0 !important;
@@ -156,7 +156,7 @@ _CSS = """
     line-height: 1.78 !important;
 }
 
-/* ── Confidence row ──────────────────────────────────────── */
+/* Confidence row */
 .conf-pill {
     display: inline-flex;
     align-items: center;
@@ -181,7 +181,7 @@ _CSS = """
     color: #92400e;
 }
 
-/* ── Source cards ────────────────────────────────────────── */
+/* Source cards */
 .ref-card {
     display: flex;
     gap: 12px;
@@ -237,7 +237,7 @@ _CSS = """
     margin-top: 2px;
 }
 
-/* ── Empty / error states ────────────────────────────────── */
+/* Empty / error states */
 .placeholder {
     text-align: center;
     color: #9ca3af;
@@ -254,7 +254,7 @@ _CSS = """
     font-size: 0.86rem;
 }
 
-/* ── Footer ──────────────────────────────────────────────── */
+/* Footer */
 .app-footer {
     text-align: center;
     font-size: 0.74rem;
@@ -317,7 +317,7 @@ _SOURCES_PLACEHOLDER = (
 )
 
 
-# ── Result builders ───────────────────────────────────────────────────────────
+# Result builders
 
 
 def _build_confidence(tier: str, coverage_note: str | None) -> str:
@@ -391,7 +391,7 @@ def _build_sources(sources: list[dict]) -> str:
     return header + "\n".join(cards)
 
 
-# ── Query handler ─────────────────────────────────────────────────────────────
+# Query handler
 
 
 def ask_pubmed(query: str) -> tuple[str, str, str]:
@@ -434,14 +434,14 @@ def ask_pubmed(query: str) -> tuple[str, str, str]:
     )
 
 
-# ── Layout ────────────────────────────────────────────────────────────────────
+# Layout
 
 
 def build_demo() -> gr.Blocks:
     with gr.Blocks(title="PubMed RAG — Oncology Evidence Search") as demo:
         gr.HTML(_BANNER)
 
-        # ── Ask a question ─────────────────────────────────────
+        # Ask a question
         with gr.Group():
             gr.HTML(_sec("Clinical Question"))
             query_box = gr.Textbox(
@@ -473,7 +473,7 @@ def build_demo() -> gr.Blocks:
             with gr.Row(elem_classes="chips-row"):
                 chips = [gr.Button(q, elem_classes="q-chip", size="sm") for q in _EXAMPLE_QUERIES]
 
-        # ── Evidence summary ───────────────────────────────────
+        # Evidence summary
         with gr.Group():
             gr.HTML(_sec("Evidence Summary"))
             answer_box = gr.Markdown(
@@ -482,13 +482,13 @@ def build_demo() -> gr.Blocks:
             )
             confidence_box = gr.HTML(value="")
 
-        # ── References ─────────────────────────────────────────
+        # References
         with gr.Group():
             sources_box = gr.HTML(value=_SOURCES_PLACEHOLDER)
 
         gr.HTML(_FOOTER)
 
-        # ── Wiring ─────────────────────────────────────────────
+        # Wiring
         outputs = [answer_box, confidence_box, sources_box]
 
         submit_btn.click(

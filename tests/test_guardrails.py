@@ -23,7 +23,7 @@ from pubmed_rag.guardrails import (
     run_output_guardrails,
 )
 
-# ── check_topic_relevance ────────────────────────────────────────────────────
+# check_topic_relevance
 
 
 class TestTopicRelevance:
@@ -85,7 +85,7 @@ class TestTopicRelevance:
         assert result.reason != ""
 
 
-# ── check_injection ──────────────────────────────────────────────────────────
+# check_injection
 
 
 class TestInjectionDetection:
@@ -170,7 +170,7 @@ class TestInjectionDetection:
         assert not result.passed
 
 
-# ── check_citations ──────────────────────────────────────────────────────────
+# check_citations
 
 
 class TestCitationCheck:
@@ -244,7 +244,7 @@ class TestCitationCheck:
         assert "5" in result.reason
 
 
-# ── check_faithfulness ───────────────────────────────────────────────────────
+# check_faithfulness
 
 
 _CHUNK_EGFR = {
@@ -312,7 +312,7 @@ class TestFaithfulnessCheck:
         assert result.passed
 
 
-# ── run_input_guardrails ─────────────────────────────────────────────────────
+# run_input_guardrails
 
 
 class TestRunInputGuardrails:
@@ -347,7 +347,7 @@ class TestRunInputGuardrails:
         assert exc_info.value.result.code == GuardrailCode.OFF_TOPIC
 
 
-# ── run_output_guardrails ────────────────────────────────────────────────────
+# run_output_guardrails
 
 
 class TestRunOutputGuardrails:
@@ -383,7 +383,7 @@ class TestRunOutputGuardrails:
             pytest.fail(f"run_output_guardrails raised unexpectedly: {exc}")
 
 
-# ── is_hard_block ────────────────────────────────────────────────────────────
+# is_hard_block
 
 
 def _low_overlap_result(n_pairs: int) -> GuardrailResult:
@@ -428,7 +428,7 @@ class TestIsHardBlock:
         assert is_hard_block(GuardrailResult(passed=False, code=GuardrailCode.OFF_TOPIC)) is False
 
 
-# ── check_nli_faithfulness ───────────────────────────────────────────────────
+# check_nli_faithfulness
 
 
 class TestNliFaithfulness:

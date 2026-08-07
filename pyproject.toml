@@ -88,7 +88,7 @@ Documentation = "https://github.com/omkaradhali/pubmed_rag#readme"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pubmed_rag"]
 
-# ── uv index configuration ─────────────────────────────────────────────────
+# uv index configuration
 # Use PyTorch CPU-only builds (no GPU on this machine — avoids 500MB+ CUDA wheels)
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -98,7 +98,7 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
 
-# ── Ruff (linter + formatter) ──────────────────────────────────────────────
+# Ruff (linter + formatter)
 [tool.ruff]
 line-length = 100
 target-version = "py312"
@@ -110,7 +110,7 @@ select = ["E", "F", "I", "UP"]  # pycodestyle, pyflakes, isort, pyupgrade
 [tool.ruff.lint.per-file-ignores]
 "eval/*.py" = ["E501"]  # long question strings in EVAL_QUESTIONS are intentional
 
-# ── Pytest ─────────────────────────────────────────────────────────────────
+# Pytest
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

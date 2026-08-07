@@ -53,7 +53,7 @@ class GuardrailError(Exception):
         super().__init__(result.reason)
 
 
-# ── Signal sets (module-level so they compile once) ──────────────────────────
+# Signal sets (module-level so they compile once)
 
 # A query passes the topic check if ANY of these appear as a whole word.
 # Broad by design — false positives (rejecting valid clinical queries) are
@@ -324,7 +324,7 @@ _STOPWORDS: frozenset[str] = frozenset(
 )
 
 
-# ── Input guardrails ─────────────────────────────────────────────────────────
+# Input guardrails
 
 
 def check_topic_relevance(query: str) -> GuardrailResult:
@@ -423,7 +423,7 @@ def run_input_guardrails(query: str) -> list[GuardrailResult]:
     return results
 
 
-# ── Output guardrails ────────────────────────────────────────────────────────
+# Output guardrails
 
 
 def check_citations(answer: str, n_sources: int) -> GuardrailResult:

@@ -59,7 +59,7 @@ CHROMA_DIR = Path(os.getenv("CHROMA_PERSIST_DIR", "data/chroma_db"))
 INGEST_QUERY = os.getenv("INGEST_QUERY", "oncology[Title/Abstract]")
 INGEST_MAX_RESULTS = int(os.getenv("INGEST_MAX_RESULTS", "500"))
 
-_SEP = "─" * 62
+_SEP = "-" * 62
 
 # Returned to the caller when a grounded, properly-cited answer cannot be
 # produced even after one corrective retry. Never surface an uncited answer.

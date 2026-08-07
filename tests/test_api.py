@@ -157,7 +157,7 @@ class TestAsk:
         assert "x-request-id" in response.headers
 
 
-# ── Auth helpers ─────────────────────────────────────────────────────────────
+# Auth helpers
 
 
 @contextmanager
