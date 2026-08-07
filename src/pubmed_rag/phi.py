@@ -40,6 +40,7 @@ Public API:
 
 import logging
 import os
+import re
 import threading
 from collections import Counter
 
@@ -104,6 +105,23 @@ _DATE_REGEXES: tuple[str, ...] = (
     rf"(?i)\b{_MONTH}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{2,4}})?\b",
     rf"(?i)\b\d{{1,2}}(?:st|nd|rd|th)?\s+{_MONTH}(?:,?\s+\d{{2,4}})?\b",  # "5 March 2019", "12 May"
 )
+
+# spaCy's general-purpose NER (trained on news/web text, not biomedical literature)
+# frequently misreads gene symbols and biomarkers as place names — "PD-1" comes
+# back tagged LOCATION. These tokens are near-universally all-uppercase
+# letters/digits, optionally with one internal hyphen (PD-1, PD-L1, HER2,
+# CTLA-4, TP53, BRCA1, EGFR, KRAS, MSI-H) — a shape essentially disjoint from
+# real place names, which are mixed-case. Filtering LOCATION hits matching this
+# shape trades a sliver of location recall (all-caps abbreviations like "US",
+# "NIH") for materially fewer false positives on the biomedical queries this
+# tool exists to answer.
+_BIOMEDICAL_TOKEN_RE = re.compile(r"^[A-Z][A-Z0-9]{0,5}(-[A-Z0-9]{1,4})?$")
+
+
+def _is_biomedical_false_positive(entity_type: str, span_text: str) -> bool:
+    """True if a LOCATION hit is actually a gene/biomarker symbol, not a place."""
+    return entity_type == "LOCATION" and bool(_BIOMEDICAL_TOKEN_RE.match(span_text))
+
 
 # spaCy model backing the Presidio NER recognizers. en_core_web_lg is Presidio's
 # recommended default (best PERSON/LOCATION recall); en_core_web_sm is lighter if
@@ -320,6 +338,11 @@ def scrub_phi(text: str) -> str:
         language="en",
         score_threshold=_ANALYZE_SCORE_THRESHOLD,
     )
+    results = [
+        r
+        for r in results
+        if not _is_biomedical_false_positive(r.entity_type, text[r.start : r.end])
+    ]
     if not results:
         return text
 
