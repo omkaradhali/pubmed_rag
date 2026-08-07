@@ -1,6 +1,6 @@
 """
 retrieve.py — Hybrid retrieval over the ChromaDB child-chunk store with
-optional BM25 fusion and cross-encoder reranking (v0.2, D-042 + Day 18 + Day 23).
+optional BM25 fusion and cross-encoder reranking.
 
 Dense-only pipeline (HYBRID_SEARCH_ENABLED=false, default):
   1. Embed the query with the bi-encoder from embed.py.
@@ -21,8 +21,8 @@ Hybrid pipeline (HYBRID_SEARCH_ENABLED=true):
 
 Why hybrid: dense retrieval misses exact biomedical terms (drug names, gene
 symbols, MeSH terms, trial IDs). BM25 catches these directly. RRF fuses both
-signals without needing score normalisation. See Day 23 ablation results in
-ablation/ABLATION.md.
+signals without needing score normalisation, since it ranks on position rather
+than on each model's incompatible score scale.
 
 The reported `score` field is cosine similarity for dense-only results; for
 hybrid results it is the RRF score (not directly comparable to cosine).
@@ -89,12 +89,12 @@ _RRF_K = int(os.getenv("RRF_K", "60"))
 # Fields stored as JSON strings in ChromaDB metadata — deserialized on retrieval.
 _JSON_FIELDS = ("authors", "publication_types", "mesh_terms")
 
-# BM25 score threshold (Strategy 1): only fuse BM25 results when the top BM25
-# score exceeds this value. Low scores mean no useful term overlap — fusion
-# would only hurt recall by displacing correct dense results.
+# BM25 score gate: only fuse BM25 results when the top BM25 score exceeds this
+# value. Low scores mean no useful term overlap — fusion would only hurt recall
+# by displacing correct dense results.
 BM25_SCORE_THRESHOLD = float(os.getenv("BM25_SCORE_THRESHOLD", "90.0"))
 
-# Compiled regex patterns for biomedical entity detection (Strategy 2).
+# Compiled regex patterns for biomedical entity detection (the entity gate).
 # When any pattern fires, BM25 is always fused regardless of the score threshold —
 # exact-term queries for drugs/genes/trials are where BM25 adds the most value.
 #
@@ -142,7 +142,7 @@ def _has_biomedical_entity(query: str) -> bool:
 def _should_use_bm25(query: str, bm25_top_score: float) -> bool:
     """Decide whether to fuse BM25 results into the final ranking.
 
-    Two-gate decision (Strategy 1 + Strategy 2):
+    Two-gate decision:
       Gate 1 — entity fast-path: if the query contains a drug name, gene
         symbol, mutation, trial ID, or biomarker, always fuse regardless of
         score. These are exactly the exact-term queries where BM25 excels.
@@ -314,7 +314,8 @@ def _build_child_result(child_text: str, meta: dict, score: float) -> dict:
     strings are deserialized back to Python lists here.
     """
     # Fall back to chunk_id when parent_id is missing — guards against legacy
-    # rows ingested before D-042 (none should exist after a re-seed).
+    # rows that predate the parent-child schema (none should exist after a
+    # re-seed, but the fallback keeps retrieval from crashing if any linger).
     parent_id = meta.get("parent_id") or meta.get("chunk_id", "")
 
     result = {
@@ -332,7 +333,7 @@ def _build_child_result(child_text: str, meta: dict, score: float) -> dict:
         "pubmed_url": f"https://pubmed.ncbi.nlm.nih.gov/{meta.get('pmid', '')}/",
         # Bibliographic
         "journal": meta.get("journal", ""),
-        # Chunk identifiers (v0.2)
+        # Chunk identifiers
         "chunk_id": meta.get("chunk_id", ""),
         "parent_id": parent_id,
         # Chunk position (within parent)
@@ -404,7 +405,7 @@ def retrieve(
     Hybrid (HYBRID_SEARCH_ENABLED=true): dense path overfetches parents (no
     reranking) → BM25 ranks all parents by keyword score → RRF fuses both
     ranked lists → return top-n fused parents. Reranking is not applied in
-    hybrid mode; it can be layered in a future session.
+    hybrid mode; it can be layered in later.
 
     Args:
         query:          Natural language query string.

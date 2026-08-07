@@ -69,7 +69,7 @@ _RETRIEVAL_N = 20  # top-k to retrieve when computing recall@k / MRR / nDCG
 _RAGAS_N = 5  # top-k passed to the LLM for RAGAS scoring (unchanged)
 
 
-# ── Question loading ──────────────────────────────────────────────────────────
+# Question loading
 
 
 def load_questions(path: Path) -> list[dict]:
@@ -88,7 +88,7 @@ def load_questions(path: Path) -> list[dict]:
     return questions
 
 
-# ── RAGAS scoring ─────────────────────────────────────────────────────────────
+# RAGAS scoring
 
 
 def score_ragas(dataset, llm, timeout_s: int = 600):
@@ -125,7 +125,7 @@ def score_ragas(dataset, llm, timeout_s: int = 600):
     return df
 
 
-# ── Retrieval metric computation ──────────────────────────────────────────────
+# Retrieval metric computation
 
 
 def compute_retrieval_metrics(questions: list[dict]) -> dict[str, dict]:
@@ -151,7 +151,7 @@ def compute_retrieval_metrics(questions: list[dict]) -> dict[str, dict]:
     return results
 
 
-# ── Printing helpers ──────────────────────────────────────────────────────────
+# Printing helpers
 
 
 def print_ragas_summary(df) -> None:
@@ -208,7 +208,7 @@ def print_retrieval_summary(ret_scores: dict[str, dict]) -> None:
     print(f"  (n={len(ret_scores)} questions with gold labels)\n")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main
 
 
 def main() -> None:
@@ -251,7 +251,7 @@ def main() -> None:
         questions = EVAL_QUESTIONS
         _logger.info("No --questions file provided; using %d inline questions.", len(questions))
 
-    # ── Deterministic retrieval metrics (fast, no LLM cost) ──────────────────
+    # Deterministic retrieval metrics (fast, no LLM cost)
     ret_scores = compute_retrieval_metrics(questions)
 
     if args.no_ragas:
@@ -277,7 +277,7 @@ def main() -> None:
         print_retrieval_summary(ret_scores)
         return
 
-    # ── RAGAS scoring ─────────────────────────────────────────────────────────
+    # RAGAS scoring
     llm = build_evaluator_llm()
     _logger.info(
         "v0.2 RAGAS eval — %d questions, judge: %s, timeout: %ds",

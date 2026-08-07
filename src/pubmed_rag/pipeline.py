@@ -59,7 +59,7 @@ CHROMA_DIR = Path(os.getenv("CHROMA_PERSIST_DIR", "data/chroma_db"))
 INGEST_QUERY = os.getenv("INGEST_QUERY", "oncology[Title/Abstract]")
 INGEST_MAX_RESULTS = int(os.getenv("INGEST_MAX_RESULTS", "500"))
 
-_SEP = "─" * 62
+_SEP = "-" * 62
 
 # Returned to the caller when a grounded, properly-cited answer cannot be
 # produced even after one corrective retry. Never surface an uncited answer.
@@ -329,7 +329,10 @@ def run_pipeline_structured(
     else:
         _logger.info("Mode: incremental — querying existing collection.")
 
-    _logger.info("Retrieving top-%d chunks for: %r", n_results, query)
+    # Do not log the query text: on a fully local stack scrub_phi is a no-op, so
+    # the query may still contain PHI. Keep it out of application logs entirely
+    # (matches the API layer's "never log the raw query" posture).
+    _logger.info("Retrieving top-%d chunks.", n_results)
     chunks = retrieve(query, n_results=n_results, min_score=min_score)
 
     # Generate with grounding enforcement: retry once on a citation/faithfulness
@@ -472,8 +475,8 @@ def _run_full_ingest(reldate: int | None = None) -> None:
             _logger.info("Removed stale %s", path)
 
     # Wipe chroma_db so the collection starts clean — upsert alone won't remove
-    # chunks from PMIDs that no longer exist in the new corpus. v0.2 also
-    # changes the ID format (chunk_id, D-042) so legacy rows must go.
+    # chunks from PMIDs that no longer exist in the new corpus, and the chunk_id
+    # format may differ from an older seeding, so stale rows must go.
     if CHROMA_DIR.exists():
         shutil.rmtree(CHROMA_DIR)
         _logger.info("Wiped chroma_db at %s", CHROMA_DIR)
@@ -492,7 +495,7 @@ def _run_full_ingest(reldate: int | None = None) -> None:
     parents, children = split_parents_children(chunks)
     _logger.info("Produced %d parents + %d children.", len(parents), len(children))
 
-    # Parents go to the sidecar JSONL — they're never embedded (D-042 sub-4).
+    # Parents go to the sidecar JSONL — they're never embedded.
     save_parents(parents, PARENTS_PATH)
 
     # Children are embedded and indexed in ChromaDB.

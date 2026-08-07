@@ -1,7 +1,7 @@
 """
-chunk.py — Split PubMed abstract records into parent + child chunks (v0.2).
+chunk.py — Split PubMed abstract records into parent + child chunks.
 
-v0.2 parent-child chunking (see D-042):
+Parent-child chunking:
   * Parent chunks (~1200 chars, paragraph-aware) carry the surrounding context
     the LLM needs at generation time. They are NOT embedded.
   * Child chunks (~300 chars, sentence-aware, ~30 char overlap inside the
@@ -36,23 +36,24 @@ _logger = logging.getLogger(__name__)
 
 # Constants
 
-# v0.2 parent-child sizes. Char-count (not token-count) approximation per D-042
-# sub-decision 1: matches v0.1, simpler, well-calibrated for English biomedical
-# text. TODO: revisit with a real tokenizer when PMC full-text lands.
+# Chunk sizes are expressed in characters, not tokens. A character-count
+# approximation is simpler than tokenizing up front and is well-calibrated for
+# English biomedical text; a real tokenizer would only be worth the cost if
+# full-text articles (rather than abstracts) were ingested.
 #
 # The real char/token ratio for all-MiniLM-L6-v2 (BERT WordPiece) on medical
 # text is ~4 chars/token — long medical words break into many subword tokens
-# (e.g. "pembrolizumab" → ~5 tokens), not few. Earlier 6:1 estimates were
-# too generous and would have overflowed MiniLM's 256-token cap.
+# (e.g. "pembrolizumab" → ~5 tokens), not few. A more generous 6:1 estimate
+# would overflow MiniLM's 256-token cap.
 #
-# Parent target ~1800 tokens ≈ ~7200 chars. Cap, not target — short abstracts
-# stay whole. Parents are NEVER embedded (they're sidecar-stored and resolved
-# at retrieve time), so the 256-token embedding cap doesn't apply here.
+# Parent target ~1800 tokens ≈ ~7200 chars. This is a cap, not a target — short
+# abstracts stay whole. Parents are NEVER embedded (they are sidecar-stored and
+# resolved at retrieve time), so the 256-token embedding cap does not apply here.
 #
-# Child target ~250 tokens ≈ ~1000 chars. Stays safely under all-MiniLM-L6-v2's
-# 256-token cap. Matches v0.1's proven calibration. Smaller children produce
-# sharper, more discriminative embeddings — measured as context_precision
-# improvement in RAGAS, not absolute cosine score.
+# Child target ~250 tokens ≈ ~1000 chars, safely under all-MiniLM-L6-v2's
+# 256-token cap. Smaller children produce sharper, more discriminative
+# embeddings — measurable as a context-precision improvement in retrieval
+# evaluation, not as a higher absolute cosine score.
 DEFAULT_PARENT_CHUNK_SIZE = 7200
 DEFAULT_PARENT_CHUNK_OVERLAP = 0  # parents don't overlap — they tile cleanly
 
@@ -100,8 +101,8 @@ def _bibliographic_fields(record: dict) -> dict:
         "pmid": record["pmid"],
         "title": record["title"],
         "year": record["year"],
-        # Link-out fields (D-031) — .get() with empty defaults keeps this
-        # backward-compatible with older abstracts.jsonl files.
+        # Link-out fields — .get() with empty defaults keeps this
+        # backward-compatible with abstracts.jsonl files that predate them.
         "doi": record.get("doi", ""),
         "doi_url": record.get("doi_url", ""),
         "pmc_id": record.get("pmc_id", ""),
@@ -122,15 +123,15 @@ def chunk_record(
     Split a single abstract record into parent + child chunks.
 
     Strategy:
-      1. Prepend title to abstract (preserves topic signal — same as v0.1).
+      1. Prepend title to abstract (preserves topic signal for short fragments).
       2. Split into parents using paragraph-aware boundaries.
       3. Split each parent into children using sentence-aware boundaries.
-      4. Always emit at least one parent per non-empty record (D-042 sub-2).
+      4. Always emit at least one parent per non-empty record.
       5. Return parents and children in a flat list, parents first, then all
          children for that parent, then the next parent's group, etc.
 
     For PubMed abstracts (~250 words) most records produce 1 parent + 1-3
-    children. PMC full-text (future) will produce multiple parents per
+    children. Longer full-text sources would produce multiple parents per
     record with many children each.
 
     Returned chunk dicts share all bibliographic fields. The role-specific
@@ -159,8 +160,8 @@ def chunk_record(
     title = record["title"]
     bib = _bibliographic_fields(record)
 
-    # Title-prefixed body — same convention as v0.1 so embeddings carry
-    # subject context even for short fragments.
+    # Title-prefixed body so embeddings carry subject context even for short
+    # fragments that would otherwise lose it.
     body = f"{title}\n\n{abstract}"
 
     parent_texts = parent_splitter.split_text(body)
@@ -190,13 +191,13 @@ def chunk_record(
         out.append(parent_chunk)
 
         # Children — split THIS parent's text only, so children never bleed
-        # across parent boundaries (D-042 sub-2: parent-child invariant).
+        # across parent boundaries (the parent-child containment invariant).
         child_texts = child_splitter.split_text(parent_text)
 
         # If a parent is shorter than child_chunk_size the child splitter
-        # may return a single fragment equal to the parent. That is fine and
-        # in fact required by D-042 sub-2 (always emit a parent row, always
-        # emit at least one child under it).
+        # may return a single fragment equal to the parent. That is expected
+        # and satisfies the invariant: always emit a parent row, and always
+        # emit at least one child under it.
         if not child_texts:
             child_texts = [parent_text]
 
@@ -316,7 +317,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     parser = argparse.ArgumentParser(
-        description="Chunk PubMed abstracts into parent + child chunks (v0.2).",
+        description="Chunk PubMed abstracts into parent + child chunks.",
     )
     parser.add_argument(
         "--input",

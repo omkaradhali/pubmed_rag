@@ -1,11 +1,11 @@
 """
 embed.py — Embed text chunks into dense vectors using sentence-transformers.
 
-The embedding model is selected by the EMBEDDING_PROVIDER env var (ADR-034):
+The embedding model is selected by the EMBEDDING_PROVIDER env var:
   miniml   — all-MiniLM-L6-v2, 384-dim, default (symmetric)
   bge      — BAAI/bge-large-en-v1.5, 1024-dim (asymmetric, query prefix)
   medcpt   — ncbi/MedCPT-Article-Encoder, 768-dim (asymmetric, separate query
-             model ncbi/MedCPT-Query-Encoder — D-043, locked 2026-06-28)
+             model ncbi/MedCPT-Query-Encoder)
 
 Passages (chunk text) are embedded with get_model(); queries go through
 embed_query(), which uses get_query_model(). For miniml/bge these return the
@@ -34,18 +34,20 @@ from sentence_transformers import SentenceTransformer
 
 _logger = logging.getLogger(__name__)
 
-# Embedding provider dispatch (EMBEDDING_PROVIDER env var, see ADR-034 + D-043).
+# Embedding provider dispatch, keyed by the EMBEDDING_PROVIDER env var.
 #
 # Each entry: (article_model_id, query_prefix, query_model_id | None).
 #
 # query/passage SYMMETRY rules:
 #   miniml  — SYMMETRIC: same model, no prefix for either side.
 #   bge     — ASYMMETRIC via PREFIX: same model, instruction prefix on query only.
-#             Omitting the prefix silently degrades retrieval (Day-19 ablation).
+#             Omitting the prefix silently degrades retrieval — the query and
+#             passage embeddings drift out of alignment.
 #   medcpt  — ASYMMETRIC via SEPARATE MODEL: ncbi/MedCPT-Article-Encoder encodes
-#             passages; ncbi/MedCPT-Query-Encoder encodes queries. Both trained
-#             jointly by NCBI on 255M PubMed click-throughs (D-043). No prefix
-#             needed — the separate model handles the query/passage distinction.
+#             passages; ncbi/MedCPT-Query-Encoder encodes queries. The two were
+#             trained jointly by NCBI on 255M PubMed click-throughs, so their
+#             vector spaces are compatible. No prefix needed — the separate model
+#             handles the query/passage distinction.
 _PROVIDERS: dict[str, tuple[str, str, str | None]] = {
     "miniml": ("all-MiniLM-L6-v2", "", None),
     "bge": (
@@ -123,14 +125,14 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
     """
     Embed child chunks and return new dicts with "embedding" added.
 
-    Only chunks with chunk_role == "child" are embedded (D-042 sub-decision 4).
-    Parents pass through the role filter and are not returned — embedding them
-    would pollute the vector index. Pipeline orchestration persists parents to
-    parents.jsonl via parents.save_parents() before calling this function.
+    Only chunks with chunk_role == "child" are embedded. Parents pass through
+    the role filter and are not returned — embedding them would pollute the
+    vector index. Pipeline orchestration persists parents to parents.jsonl via
+    parents.save_parents() before calling this function.
 
-    For backward-compatibility with v0.1 chunk dicts (which had no chunk_role
-    field), chunks missing the role key are treated as children — this keeps
-    older test fixtures and ad-hoc scripts working.
+    Chunk dicts with no chunk_role field are treated as children, so simple
+    flat-chunk inputs (test fixtures, ad-hoc scripts) that predate the
+    parent-child schema keep working.
 
     Does not mutate the input list — each returned dict is a shallow copy of
     the original with an additional "embedding" key.

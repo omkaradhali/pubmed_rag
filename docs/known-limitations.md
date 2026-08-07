@@ -1,12 +1,14 @@
 # Known Limitations
 
-This document captures the known constraints of pubmed_rag v0.2. Understanding these before deployment prevents surprises in production.
+This document captures the known constraints of pubmed_rag v1.0. Understanding these before deployment prevents surprises in production.
+
+> **Intended use:** pubmed_rag is for research and educational use only. It is not a medical device, is not FDA-cleared, and must not be used for diagnosis, treatment, or clinical decision-making. Its answers are generated from PubMed abstracts and may be incomplete or incorrect; always defer to a qualified clinician and to primary sources.
 
 ---
 
 ## Corpus
 
-### Abstracts only — no full text
+### Abstracts only, no full text
 The pipeline ingests PubMed abstracts (typically 200–400 words), not full papers. Claims that require detailed methodology, supplementary data, or results tables cannot be fully supported. For clinical decision support contexts, this means complex statistical breakdowns or sub-group analyses from the methods section will not be retrievable.
 
 **Planned mitigation:** v3.0 will add PMC full-text ingestion via the PubMed Central OAI-PMH endpoint.
@@ -41,7 +43,7 @@ Dynamic hybrid BM25+RRF is disabled by default (`HYBRID_SEARCH_ENABLED=false`). 
 The input guardrail uses a fixed biomedical term set. A highly specific clinical query that uses no common biomedical keywords (e.g., a niche assay name not in the term list) may be passed through without validation. The permissive design (only reject when a blocklist pattern fires AND no biomedical signal exists) minimises false positives at the cost of some false negatives.
 
 ### Faithfulness check is lexical, not semantic
-The output faithfulness guardrail computes unigram Jaccard overlap between a cited sentence and its source chunk. It catches outright hallucinations (zero shared tokens) but will not flag semantically faithful paraphrases that share few surface tokens. The Jaccard threshold of 0.05 is intentionally low — use RAGAS faithfulness (LLM-as-judge) for semantic coverage during evaluation.
+The output faithfulness guardrail computes unigram Jaccard overlap between a cited sentence and its source chunk. It catches outright hallucinations (zero shared tokens) but will not flag semantically faithful paraphrases that share few surface tokens. The Jaccard threshold of 0.05 is intentionally low; use RAGAS faithfulness (LLM-as-judge) for semantic coverage during evaluation.
 
 ---
 
@@ -57,8 +59,11 @@ The 97-question labeled benchmark was generated from the same 5,000-abstract cor
 
 ## API and Security
 
-### No authentication in v0.2
-The `/ask` and `/cds-services` endpoints have no authentication. Do not expose the API publicly without completing the Day 29 auth + rate-limiting milestone (`slowapi` + static API key). See `SECURITY.md` for guidance.
+### Authentication is opt-in and disabled by default
+The API ships with static API-key authentication (`X-API-Key` header) and per-IP rate limiting (`slowapi`, 10 requests/hour on `/ask`). Authentication is **disabled by default**: when `API_KEYS` is empty, `/ask` and `/cds-services` accept unauthenticated requests, which is convenient for local development but unsafe on a public network. Set `API_KEYS` to one or more comma-separated keys before exposing the API. The key scheme is intentionally simple (static shared keys, no per-user identity, no rotation); richer auth (OAuth/OIDC, per-user scopes) is out of scope for v1.0. See `SECURITY.md` for guidance.
+
+### HL7 CDS Hooks integration is experimental
+The `/cds-services` discovery and service endpoints implement the CDS Hooks 1.0 specification as a functional reference. They have not been validated against a live EHR, carry no clinical validation, and are not intended for use in patient care. Treat them as a demonstration of EHR-integration mechanics, not a production clinical service.
 
 ### Rate limit: NCBI without an API key
 Without a free NCBI API key, the ingestion pipeline is capped at 3 requests/second. Large corpus builds (`--mode full`, 5,000+ abstracts) will be throttled. Register at [https://www.ncbi.nlm.nih.gov/account/](https://www.ncbi.nlm.nih.gov/account/) and set `NCBI_API_KEY` to raise the limit to 10 req/s.
@@ -67,27 +72,27 @@ Without a free NCBI API key, the ingestion pipeline is capped at 3 requests/seco
 When `LLM_PROVIDER=ollama` (the default), the Ollama service must be reachable at `OLLAMA_BASE_URL`. If Ollama is not running, all `/ask` calls will fail with a 500 error. Set `LLM_PROVIDER=anthropic` or `LLM_PROVIDER=openai` with the corresponding API key to remove the local dependency.
 
 ### PHI scrubbing scope (cloud egress only)
-Query de-identification (`PHI_SCRUBBING`, powered by Microsoft Presidio) runs only when a cloud provider is configured — `LLM_PROVIDER` is not `ollama`, or `EMBEDDING_PROVIDER` is not a local embedder (`miniml`/`medcpt`). A fully local stack does not scrub, because no text leaves the server. The gate is fail-safe: any unrecognized provider is treated as cloud and scrubbed.
+Query de-identification (`PHI_SCRUBBING`, powered by Microsoft Presidio) runs only when a cloud provider is configured: `LLM_PROVIDER` is not `ollama`, or `EMBEDDING_PROVIDER` is not a local embedder (`miniml`/`medcpt`). A fully local stack does not scrub, because no text leaves the server. The gate is fail-safe: any unrecognized provider is treated as cloud and scrubbed.
 
 Scrubbing covers names, calendar dates (with a day), MRNs (near a cue word), phone numbers, SSNs, email addresses, IP addresses, URLs, and locations. It is **best-effort defense in depth, not a HIPAA Safe Harbor guarantee.** Known gaps, in rough order of likelihood:
 
-- **Two-component numeric dates** (`10/14`, `5/10`) are not scrubbed — they collide with dosing and ratios, so the recognizer requires a full date (a numeric triple, or a month name with a day). Conversely a triple like a version or schedule string (`10.10.10`) may be over-scrubbed as a date.
+- **Two-component numeric dates** (`10/14`, `5/10`) are not scrubbed; they collide with dosing and ratios, so the recognizer requires a full date (a numeric triple, or a month name with a day). Conversely a triple like a version or schedule string (`10.10.10`) may be over-scrubbed as a date.
 - **Month/year with no day** (`May 1960`) is left intact as a likely literature reference; a date of birth written that way would survive.
 - **Ages over 89 and very old years** (`92-year-old`, a `1932` birth year) are not scrubbed. HIPAA Safe Harbor requires removing these; the tool preserves standalone years to keep publication references usable.
 - **Alphanumeric MRNs** (`U1234567`, `M-12345`) and cue words beyond `mrn/medical/record/chart` (e.g. `account`, `encounter`) are not matched; a purely numeric MRN needs an adjacent cue word to be caught at all.
 - **Zip codes and street addresses** rely on the spaCy `LOCATION` model, which is unreliable on standalone addresses without sentence context. Device serial numbers are not covered.
 - **Lowercase names** (`pt john doe`) are frequently missed by the NER model, which weights capitalization heavily.
 - **Eponyms and named syndromes** (`Hodgkin`, `Li-Fraumeni`) may occasionally be flagged as `PERSON` and redacted, weakening retrieval.
-- **Indirect / re-identifying details** — a treating physician or facility (`Dr. Smith`, `Dana-Farber`) combined with a rare diagnosis can be identifying even when no direct identifier remains.
+- **Indirect / re-identifying details:** a treating physician or facility (`Dr. Smith`, `Dana-Farber`) combined with a rare diagnosis can be identifying even when no direct identifier remains.
 
 For any workflow that may involve real patient data, run the fully local stack (`ollama` + `miniml`/`medcpt`). Do not treat scrubbing as a substitute for a Business Associate Agreement or for avoiding PHI in queries. See `SECURITY.md`.
 
 ---
 
-## Not Limitations — Common Misunderstandings
+## Not Limitations: Common Misunderstandings
 
 | Perceived issue | Reality |
 |---|---|
-| "No UI" | A Gradio demo UI exists at `demo/gradio_app.py`. The FastAPI backend intentionally has no built-in HTML UI — the Swagger docs at `/docs` serve as the primary interface. |
+| "No UI" | A Gradio demo UI exists at `demo/gradio_app.py`. The FastAPI backend intentionally has no built-in HTML UI; the Swagger docs at `/docs` serve as the primary interface. |
 | "Only oncology" | The `INGEST_QUERY` env var accepts any valid PubMed search string. The oncology default is a starting point, not a constraint. |
 | "Slow cold start" | The embedding model (~90MB) and BM25 index are loaded at startup. After that, query latency is ~1-3 sec (mostly LLM). Use `EMBEDDING_PROVIDER=miniml` to keep the model small. |

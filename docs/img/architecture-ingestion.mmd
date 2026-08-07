@@ -1,0 +1,10 @@
+flowchart TD
+    A["PubMed E-utilities"] --> B["ingest.py"]
+    B --> C[("abstracts.jsonl<br/>pmid, title, abstract, authors, journal,<br/>year, doi, mesh_terms, publication_types")]
+    C --> D["chunk.py<br/>parent-child split"]
+    D --> E[("parents.jsonl<br/>~1,200-char parent passages")]
+    D --> F[("child chunks<br/>~300-char, embedded targets")]
+    F --> G["embed.py"]
+    G --> H[("embeddings.jsonl<br/>384-dim, all-MiniLM-L6-v2")]
+    H --> I["vectorstore.py"]
+    I --> J[("ChromaDB / Qdrant<br/>children indexed by chunk_id")]

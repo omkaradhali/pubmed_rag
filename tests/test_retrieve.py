@@ -1,5 +1,5 @@
 """
-Unit tests for retrieve.py — v0.2 parent-child resolution + dedup (D-042).
+Unit tests for retrieve.py — parent-child resolution + dedup.
 
 The retrieve() function calls three external dependencies:
   - get_model().encode()  (sentence-transformers, loads ~100MB)
@@ -45,7 +45,7 @@ def _meta(
     parent_id: str = "12345_p0",
     chunk_role: str = "child",
 ) -> dict:
-    """Minimal ChromaDB metadata dict matching the v0.2 schema (D-042)."""
+    """Minimal ChromaDB metadata dict matching the parent-child schema."""
     return {
         "pmid": pmid,
         "title": title,
@@ -60,7 +60,7 @@ def _meta(
         "mesh_terms": "[]",
         "chunk_index": chunk_index,
         "chunk_total": chunk_total,
-        # v0.2 (D-042)
+        # Parent-child schema fields
         "chunk_id": chunk_id,
         "chunk_role": chunk_role,
         "parent_id": parent_id,

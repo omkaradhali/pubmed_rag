@@ -17,12 +17,15 @@ is still returned to the caller with the flags attached.
     run_output_guardrails(answer, chunks) -> list[GuardrailResult]
 """
 
+import logging
 import re
 import string
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 from pubmed_rag import faithfulness_nli
+
+_logger = logging.getLogger(__name__)
 
 
 class GuardrailCode(StrEnum):
@@ -50,7 +53,7 @@ class GuardrailError(Exception):
         super().__init__(result.reason)
 
 
-# ── Signal sets (module-level so they compile once) ──────────────────────────
+# Signal sets (module-level so they compile once)
 
 # A query passes the topic check if ANY of these appear as a whole word.
 # Broad by design — false positives (rejecting valid clinical queries) are
@@ -321,7 +324,7 @@ _STOPWORDS: frozenset[str] = frozenset(
 )
 
 
-# ── Input guardrails ─────────────────────────────────────────────────────────
+# Input guardrails
 
 
 def check_topic_relevance(query: str) -> GuardrailResult:
@@ -420,30 +423,34 @@ def run_input_guardrails(query: str) -> list[GuardrailResult]:
     return results
 
 
-# ── Output guardrails ────────────────────────────────────────────────────────
+# Output guardrails
 
 
 def check_citations(answer: str, n_sources: int) -> GuardrailResult:
     """
     Verify the generated answer contains valid inline [N] citations.
 
-    Skipped entirely when n_sources == 0 or when the answer is the
-    "does not address" fallback (citations are intentionally absent there).
+    Skipped entirely when n_sources == 0. A "does not address" refusal excuses
+    the *absence* of citations (they are intentionally absent there) but never a
+    citation that is out of range: a refusal phrase must not smuggle a fabricated
+    [N] past the range check, since none of the other output guardrails catch an
+    out-of-range citation either (they skip it).
 
     Checks:
-      A) At least one [N] marker present.
-      B) No citation number exceeds n_sources.
+      A) At least one [N] marker present (excused on a genuine refusal).
+      B) No citation number exceeds n_sources (always enforced when any cited).
     """
     if n_sources == 0:
-        return GuardrailResult(passed=True)
-
-    lowered = answer.lower()
-    if any(phrase in lowered for phrase in _NO_CONTEXT_PHRASES):
         return GuardrailResult(passed=True)
 
     cited = [int(n) for n in _CITATION_RE.findall(answer)]
 
     if not cited:
+        # A genuine refusal legitimately has no citations — only this branch is
+        # excused by a no-context phrase, not the out-of-range check below.
+        lowered = answer.lower()
+        if any(phrase in lowered for phrase in _NO_CONTEXT_PHRASES):
+            return GuardrailResult(passed=True)
         return GuardrailResult(
             passed=False,
             code=GuardrailCode.MISSING_CITATIONS,
@@ -545,8 +552,22 @@ def check_nli_faithfulness(answer: str, chunks: list[dict]) -> GuardrailResult:
 
     The model is lazy-loaded on first use (see faithfulness_nli); this returns a
     passing result immediately when there is nothing cited to check.
+
+    Availability note: the NLI model is loaded on first use and may be unavailable
+    (weights not downloaded, out of memory, runtime error). Rather than turning
+    every clinical query into a 500, such a failure degrades this single check to
+    a pass — the citation and lexical-overlap guardrails still run — and is logged
+    loudly so the operator can restore the model. Warm the model at startup (or
+    pre-bake it into the deployment image) to surface load failures at boot.
     """
-    contradictions = faithfulness_nli.find_contradictions(answer, chunks)
+    try:
+        contradictions = faithfulness_nli.find_contradictions(answer, chunks)
+    except Exception:
+        _logger.exception(
+            "NLI faithfulness check failed to run — degrading to pass for this query. "
+            "The citation and lexical-overlap guardrails still applied."
+        )
+        return GuardrailResult(passed=True)
     if not contradictions:
         return GuardrailResult(passed=True)
 

@@ -1,11 +1,11 @@
 """
-Unit tests for chunk.py — v0.2 parent-child schema (D-042).
+Unit tests for chunk.py — the parent-child chunking schema.
 
 Uses small synthetic records — no disk I/O, no JSONL files.
 
 Tests cover:
-  * shape — every chunk has the v0.2 keys (chunk_id, chunk_role, parent_id)
-  * always-emit-parent invariant (D-042 sub-decision 2)
+  * shape — every chunk has the parent-child keys (chunk_id, chunk_role, parent_id)
+  * always-emit-parent invariant (every non-empty record yields ≥1 parent)
   * parent_id linkage — every child's parent_id matches an emitted parent's chunk_id
   * ID format — {pmid}_p{i} for parents, {pmid}_p{i}_c{j} for children
   * role invariants — parents have parent_id=None, children have parent_id set
@@ -73,7 +73,7 @@ _EXPECTED_KEYS = {
     "text",
     "chunk_index",
     "chunk_total",
-    # v0.2 (D-042)
+    # Parent-child schema fields
     "chunk_id",
     "chunk_role",
     "parent_id",

@@ -38,5 +38,5 @@ Qdrant was chosen as the production backend because:
 - Both backends must support metadata filtering (needed for specialty-scoped queries)
 - `QDRANT_URL` and `QDRANT_API_KEY` env vars required when using Qdrant backend
 - ChromaDB remains the default — no setup friction for OSS users
-- pgvector (PostgreSQL) was considered but deferred; Omkar's existing Postgres expertise makes
-  it a viable future backend if the project moves to a Postgres-centric stack
+- pgvector (PostgreSQL) was considered but deferred; it remains a viable future backend for
+  deployments that are already Postgres-centric and prefer one datastore over two

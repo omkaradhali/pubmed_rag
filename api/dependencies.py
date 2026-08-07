@@ -1,3 +1,10 @@
+"""
+dependencies.py — Shared FastAPI dependencies for the pubmed_rag API.
+
+Currently holds the optional API-key authentication dependency, injected into
+protected routes via Depends(verify_api_key).
+"""
+
 from fastapi import Depends, Header, HTTPException
 
 from api.config import Settings, get_settings

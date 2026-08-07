@@ -69,4 +69,4 @@ The reranker alone (MRR=0.950) outperforms dense+hybrid+rerank (MRR=0.938) on th
 - Dynamic routing recovers most of the recall regression from naive hybrid (0.796 → 0.903) without degrading conceptual question performance.
 - The BM25 threshold (90.0) is calibrated on the current 5K-abstract oncology corpus. If the corpus composition changes substantially, recalibrate by inspecting the score distribution with `--debug-bm25`.
 - The in-memory BM25 index does not survive process restarts without reloading `parents.jsonl`. For large corpora (v2.0+), replace with Atlas `$search` (Lucene) which persists natively and scales horizontally.
-- Hybrid is the correct default for v2.0 (MongoDB Atlas) where the query workload may be more entity-heavy. The Day 23 implementation is the learning scaffold; Atlas `$rankFusion` replaces `rank_bm25` in v2.0.
+- Hybrid is the correct default for v2.0 (MongoDB Atlas) where the query workload may be more entity-heavy. The current `rank_bm25` implementation is the self-hosted scaffold; Atlas `$rankFusion` replaces it in v2.0.

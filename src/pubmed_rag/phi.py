@@ -1,17 +1,16 @@
 """
 phi.py — PHI/PII scrubbing before any query text leaves the server.
 
-Tier 1 pre-release blocker (Session C). Clinicians habitually paste patient
-context into free-text boxes ("my patient John Doe, DOB 05/12/1960, MRN
-4471902, stage IV NSCLC..."). If a cloud egress path is configured — the LLM
-provider is anthropic/haiku/sonnet/openai, OR EMBEDDING_PROVIDER=openai — that
-text leaves the server and becomes a HIPAA violation. LLM_PROVIDER=ollama with
-EMBEDDING_PROVIDER=miniml/medcpt is fully local and needs no scrubbing.
+Clinicians habitually paste patient context into free-text boxes ("my patient
+John Doe, DOB 05/12/1960, MRN 4471902, stage IV NSCLC..."). If a cloud egress
+path is configured — the LLM provider is anthropic/haiku/sonnet/openai, OR
+EMBEDDING_PROVIDER=openai — that text leaves the server and becomes a HIPAA
+violation. LLM_PROVIDER=ollama with EMBEDDING_PROVIDER=miniml/medcpt is fully
+local and needs no scrubbing.
 
 Scrubbing runs ONCE at pipeline entry (run_pipeline_structured), after the input
 guardrails and before retrieval, so the same de-identified query flows to the
-embedder, the generation prompt, AND the Session D audit log. See the design
-brief in claude-brain: projects/pubmed-rag/session-c-phi-scrubbing.md.
+embedder, the generation prompt, AND the audit log.
 
 Engine: Microsoft Presidio (presidio-analyzer + presidio-anonymizer), backed by
 a spaCy pipeline for the PERSON/LOCATION NER recognizers. The analyzer is a heavy
@@ -24,7 +23,7 @@ conftest) or get_analyzer so no model download occurs in CI.
 Anonymization is deterministic replacement: each detected span becomes an
 entity-type tag, e.g. `<PERSON>`, `<DATE_TIME>`, `<US_SSN>`, `<MRN>`. No
 reversible tokens and no per-run randomness — the same input always yields the
-same output, which the Session D audit log relies on.
+same output, which the audit log relies on for reproducibility.
 
 NEVER log raw query text or detected PHI values. Log only aggregate counts by
 entity type at INFO.

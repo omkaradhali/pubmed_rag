@@ -1,29 +1,60 @@
+<div align="center">
+
 # pubmed-rag
 
+**A production-grade RAG pipeline for clinical literature.**
+
+Fetch PubMed abstracts, embed them into a vector store, and answer natural-language
+questions grounded in retrieved papers with inline citations.
+
 [![CI](https://github.com/omkaradhali/pubmed_rag/actions/workflows/ci.yml/badge.svg)](https://github.com/omkaradhali/pubmed_rag/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-220%20passing-brightgreen.svg)](https://github.com/omkaradhali/pubmed_rag/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
+[![Code style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-A production-grade RAG pipeline for clinical literature. Fetch PubMed abstracts, embed them into a vector store, and answer natural language questions grounded in retrieved papers with inline citations.
+</div>
 
-**Built for:** clinical researchers, bioinformaticians, and developers learning biomedical RAG.
+> **Built for** clinical researchers, bioinformaticians, and developers learning biomedical RAG.
+
+> [!WARNING]
+> **For research and educational use only.** pubmed_rag is not a medical device and is not intended for diagnosis, treatment, or clinical decision-making. See [Intended Use, Safety & Limitations](#intended-use-safety--limitations).
+
+---
+
+## Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Intended Use, Safety & Limitations](#intended-use-safety--limitations)
+- [Quick Start](#quick-start)
+- [Manual Pipeline (CLI)](#manual-pipeline-cli)
+- [HL7 CDS Hooks Integration](#hl7-cds-hooks-integration)
+- [Configuration](#configuration)
+- [Evaluation](#evaluation)
+- [Project Structure](#project-structure)
+- [Docker](#docker)
+- [Architecture Decision Records](#architecture-decision-records)
+- [Contributing](#contributing)
+- [Citation](#citation)
+- [License](#license)
 
 ---
 
 ## Features
 
-- **Full ingestion pipeline** — PubMed E-utilities → parent-child chunking → sentence-transformer embeddings → ChromaDB
-- **Two-stage retrieval** — bi-encoder dense retrieval shortlists candidates; `ncbi/MedCPT-Cross-Encoder` reranks for clinical relevance
-- **Dynamic hybrid search** — entity-gated BM25+RRF fusion activates only when the query contains named entities (drug names, gene symbols, trial IDs); dense-only otherwise
-- **Input + output guardrails** — topic relevance check and injection detection gate queries before retrieval; citation presence and lexical faithfulness checks flag answers after generation
-- **Citation-enforced generation** — the LLM is instructed to cite every claim inline; hallucinated sources are structurally prevented
-- **HL7 CDS Hooks integration** — `GET /cds-services` discovery + `POST /cds-services/pubmed-rag` patient-view hook; plug into any CDS Hooks-compatible EHR
-- **Gradio demo UI** — browser-based interface at `demo/gradio_app.py`; no API tooling required
-- **Pluggable providers** — swap the LLM (Ollama, Anthropic, OpenAI) and embedding model via a single env var
-- **FastAPI backend** — structured JSON responses, request ID tracing, Swagger docs at `/docs`
-- **Dual evaluation suite** — RAGAS (LLM-as-judge) + deterministic recall@k/MRR/nDCG against a 97-question labeled benchmark
-- **Docker + CI** — ready-to-run Docker image and GitHub Actions workflow included
-- **Production path** — swap ChromaDB → Qdrant and `all-MiniLM-L6-v2` → `text-embedding-3-small` with two env var changes
+- **Full ingestion pipeline:** PubMed E-utilities → parent-child chunking → sentence-transformer embeddings → ChromaDB
+- **Two-stage retrieval:** bi-encoder dense retrieval shortlists candidates; `ncbi/MedCPT-Cross-Encoder` reranks for clinical relevance
+- **Dynamic hybrid search:** entity-gated BM25+RRF fusion activates only when the query contains named entities (drug names, gene symbols, trial IDs); dense-only otherwise
+- **Input and output guardrails:** topic relevance check and injection detection gate queries before retrieval; citation presence and lexical faithfulness checks flag answers after generation
+- **Citation-enforced generation:** the LLM is instructed to cite every claim inline; hallucinated sources are structurally prevented
+- **HL7 CDS Hooks integration:** `GET /cds-services` discovery and `POST /cds-services/pubmed-rag` patient-view hook; plug into any CDS Hooks-compatible EHR
+- **Gradio demo UI:** browser-based interface at `demo/gradio_app.py`; no API tooling required
+- **Pluggable providers:** swap the LLM (Ollama, Anthropic, OpenAI) and embedding model via a single env var
+- **FastAPI backend:** structured JSON responses, request ID tracing, Swagger docs at `/docs`
+- **Dual evaluation suite:** RAGAS (LLM-as-judge) and deterministic recall@k/MRR/nDCG against a 97-question labeled benchmark
+- **Docker and CI:** ready-to-run Docker image and GitHub Actions workflow included
+- **Production path:** swap ChromaDB → Qdrant and `all-MiniLM-L6-v2` → `text-embedding-3-small` with two env var changes
 
 ---
 
@@ -31,69 +62,44 @@ A production-grade RAG pipeline for clinical literature. Fetch PubMed abstracts,
 
 ### Ingestion (offline, run once or on a schedule)
 
-```
-PubMed E-utilities
-       │
-       ▼
-  ingest.py ─────────── abstracts.jsonl
-                         (pmid, title, abstract, authors, journal,
-                          year, doi, mesh_terms, publication_types)
-       │
-       ▼
-  chunk.py ──────────┬─ parents.jsonl   (~1,200-char parent passages)
-  parent-child split └─ child chunks    (~300-char, embedded targets)
-       │
-       ▼
-  embed.py ─────────── embeddings.jsonl  (384-dim, all-MiniLM-L6-v2)
-       │
-       ▼
-  vectorstore.py ───── ChromaDB / Qdrant  (children indexed by chunk_id)
-```
+<div align="center">
+
+<img src="docs/img/architecture-ingestion.svg" alt="Ingestion pipeline: PubMed E-utilities to ingest.py to abstracts.jsonl, chunked into parents and child chunks, embedded, and indexed in ChromaDB or Qdrant" width="360">
+
+<sub>Source: <a href="docs/img/architecture-ingestion.mmd">architecture-ingestion.mmd</a></sub>
+
+</div>
 
 ### Query path (online, ~1-3 sec)
 
-```
-  query
-    │
-    ▼
-  guardrails.py  [INPUT]
-  · topic relevance check  ─── off-topic? → 422 early exit
-  · injection detection    ─── injection?  → 422 early exit
-    │
-    ▼
-  retrieve.py
-  ┌───────────────────────────────────────────────────┐
-  │  dense search  ChromaDB cosine similarity, top-k  │
-  │  + hybrid?     BM25+RRF (entity-gated, opt-in)   │
-  │                ↳ Gate 1: entity detected in query  │
-  │                ↳ Gate 2: top BM25 score > 90.0    │
-  └───────────────────────────────────────────────────┘
-    │
-    ▼
-  rerank.py       ncbi/MedCPT-Cross-Encoder
-                  re-scores (query, child) pairs → top-5
-    │
-    ▼
-  parents.py      resolve child hits → full parent text
-    │
-    ▼
-  generate.py     citation-enforced LLM prompt
-    │
-    ▼
-  guardrails.py  [OUTPUT]
-  · citation check     ─── no [N] markers? → flag
-  · faithfulness check ─── Jaccard < 0.05?  → flag
-    │
-    ▼
-  PipelineResult  (answer · sources · guardrail_flags)
-```
+<div align="center">
+
+<img src="docs/img/architecture-query-path.svg" alt="Query path: query to input guardrails (topic relevance, injection) with 422 early exit, then retrieve.py dense/hybrid search, rerank.py, parents.py, generate.py, output guardrails (citation, faithfulness), returning a PipelineResult" width="420">
+
+<sub>Source: <a href="docs/img/architecture-query-path.mmd">architecture-query-path.mmd</a></sub>
+
+</div>
 
 Retrieval metrics at N=97 labeled questions: **recall@20 = 0.97 · MRR = 0.95 · nDCG@20 = 0.90**.
 
 The pipeline runs in two modes:
 
-- **`incremental`** (default) — queries the pre-seeded vector store. Fast, ~1-3 sec, mostly LLM latency.
-- **`full`** — wipes and rebuilds the corpus from scratch before querying. Use when corpus is stale.
+- **`incremental`** (default): queries the pre-seeded vector store. Fast, ~1-3 sec, mostly LLM latency.
+- **`full`**: wipes and rebuilds the corpus from scratch before querying. Use when the corpus is stale.
+
+---
+
+## Intended Use, Safety & Limitations
+
+> [!WARNING]
+> **Research and educational use only.** pubmed_rag is not a medical device, is not FDA-cleared, and is not intended for diagnosis, treatment, or any clinical decision-making. Answers are generated from abstract text and may be incomplete or wrong. Always defer to a qualified clinician and to primary sources.
+
+- **Not a medical device.** No output should be used to guide patient care. There is no regulatory clearance and no warranty of clinical accuracy.
+- **The corpus is a bounded snapshot.** The system answers only from PubMed *abstracts* (not full text), for the specialty and time window you ingest (`PUBMED_SPECIALTY`, `PUBMED_YEARS_BACK`; default oncology, last 10 years). It does not auto-refresh, so answers reflect the literature as of your last ingestion run and anything published after that date is absent.
+- **PHI stays local.** Query de-identification (Presidio) is best-effort defense in depth, **not** a HIPAA Safe Harbor guarantee. For any workflow that may involve real patient data, run the fully local stack (`LLM_PROVIDER=ollama` plus a local embedder, `miniml` or `medcpt`) so no text leaves the server. Do not send PHI to cloud providers.
+- **HL7 CDS Hooks integration is experimental.** The `/cds-services` endpoints are a functional reference implementation of the spec, unvalidated in any live EHR and not for clinical use.
+
+Full detail, including retrieval, guardrail, and evaluation caveats, is in [docs/known-limitations.md](docs/known-limitations.md).
 
 ---
 
@@ -102,7 +108,7 @@ The pipeline runs in two modes:
 ### Requirements
 
 - Python 3.12+
-- [uv](https://github.com/astral-sh/uv) — fast Python package manager
+- [uv](https://github.com/astral-sh/uv), a fast Python package manager
 - [Ollama](https://ollama.com) running locally (default LLM provider), **or** an `ANTHROPIC_API_KEY`
 
 ### Install
@@ -113,7 +119,7 @@ cd pubmed_rag
 uv venv .venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 cp .env.example .env
-# Edit .env — set NCBI_API_KEY (optional) and your chosen LLM provider key
+# Edit .env: set NCBI_API_KEY (optional) and your chosen LLM provider key
 ```
 
 ### Seed the corpus and run a query
@@ -148,7 +154,34 @@ API_BASE_URL=http://localhost:8001 python demo/gradio_app.py
 
 ---
 
+## Manual Pipeline (CLI)
+
+Run each stage individually instead of the one-shot `pipeline` command:
+
+```bash
+# 1. Fetch abstracts
+python -m pubmed_rag.ingest --query "oncology[Title/Abstract]" --max-results 500 \
+  --output data/abstracts.jsonl
+
+# 2. Chunk
+python -m pubmed_rag.chunk --input data/abstracts.jsonl --output data/chunks.jsonl
+
+# 3. Embed
+python -m pubmed_rag.embed --input data/chunks.jsonl --output data/embeddings.jsonl
+
+# 4. Seed vector store
+python -m pubmed_rag.vectorstore --input data/embeddings.jsonl
+
+# 5. Query
+python -m pubmed_rag.pipeline "What are the treatments for HER2-positive breast cancer?" --verbose
+```
+
+---
+
 ## HL7 CDS Hooks Integration
+
+> [!NOTE]
+> **Experimental.** This is a functional reference implementation of the CDS Hooks spec. It has not been validated in a live EHR and is not for clinical use.
 
 pubmed_rag implements the [HL7 CDS Hooks 1.0](https://cds-hooks.hl7.org/1.0/) specification. Any CDS Hooks-compatible EHR can subscribe to the pubmed-rag service and receive cited oncology evidence cards during the patient-view workflow.
 
@@ -196,11 +229,11 @@ The service returns a CDS card with the synthesized answer, inline citations, an
     "detail": "Full answer with [1][2][3] inline citations...\n\n**Sources**\n1. ...",
     "indicator": "info",
     "source": {
-      "label": "pubmed_rag — Oncology Evidence Service",
+      "label": "pubmed_rag Oncology Evidence Service",
       "url": "https://pubmed.ncbi.nlm.nih.gov"
     },
     "links": [
-      { "label": "[1] PMID 42041395 — Post-Chemotherapy Antibody-Based...", "url": "https://pubmed.ncbi.nlm.nih.gov/42041395/", "type": "absolute" }
+      { "label": "[1] PMID 42041395 Post-Chemotherapy Antibody-Based...", "url": "https://pubmed.ncbi.nlm.nih.gov/42041395/", "type": "absolute" }
     ]
   }]
 }
@@ -210,46 +243,24 @@ The service returns a CDS card with the synthesized answer, inline citations, an
 
 ---
 
-### Step-by-step pipeline (CLI)
-
-```bash
-# 1. Fetch abstracts
-python -m pubmed_rag.ingest --query "oncology[Title/Abstract]" --max-results 500 \
-  --output data/abstracts.jsonl
-
-# 2. Chunk
-python -m pubmed_rag.chunk --input data/abstracts.jsonl --output data/chunks.jsonl
-
-# 3. Embed
-python -m pubmed_rag.embed --input data/chunks.jsonl --output data/embeddings.jsonl
-
-# 4. Seed vector store
-python -m pubmed_rag.vectorstore --input data/embeddings.jsonl
-
-# 5. Query
-python -m pubmed_rag.pipeline "What are the treatments for HER2-positive breast cancer?" --verbose
-```
-
----
-
 ## Configuration
 
 Copy `.env.example` to `.env`. All variables have sensible defaults for local development.
 
 | Variable | Default | Description |
 |---|---|---|
-| `NCBI_API_KEY` | — | NCBI API key — optional, but raises rate limit from 3 to 10 req/s |
+| `NCBI_API_KEY` | `(none)` | NCBI API key. Optional, but raises the rate limit from 3 to 10 req/s |
 | `LLM_PROVIDER` | `ollama` | LLM backend: `ollama`, `anthropic`, or `openai` |
 | `LLM_MODEL` | `llama3.1:8b` | Model name for the selected provider |
-| `ANTHROPIC_API_KEY` | — | Required when `LLM_PROVIDER=anthropic` |
-| `OPENAI_API_KEY` | — | Required when `LLM_PROVIDER=openai` |
+| `ANTHROPIC_API_KEY` | `(none)` | Required when `LLM_PROVIDER=anthropic` |
+| `OPENAI_API_KEY` | `(none)` | Required when `LLM_PROVIDER=openai` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API endpoint |
 | `VECTOR_STORE_BACKEND` | `chroma` | Vector store: `chroma` (local, zero config) or `qdrant` (production) |
 | `CHROMA_PERSIST_DIR` | `./data/chroma_db` | ChromaDB persistence directory |
-| `QDRANT_URL` | — | Qdrant endpoint — required when backend is `qdrant` |
-| `QDRANT_API_KEY` | — | Qdrant API key |
+| `QDRANT_URL` | `(none)` | Qdrant endpoint, required when the backend is `qdrant` |
+| `QDRANT_API_KEY` | `(none)` | Qdrant API key |
 | `EMBEDDING_PROVIDER` | `miniml` | Embedding model: `miniml` (all-MiniLM, local), `medcpt` (biomedical, local), or `openai` |
-| `PUBMED_SPECIALTY` | `oncology` | Corpus specialty — maps to a MeSH search string |
+| `PUBMED_SPECIALTY` | `oncology` | Corpus specialty, maps to a MeSH search string |
 | `PUBMED_YEARS_BACK` | `10` | Years of PubMed literature to include in the corpus |
 | `INGEST_QUERY` | `oncology[Title/Abstract]` | PubMed search string for corpus ingestion |
 | `INGEST_MAX_RESULTS` | `500` | Maximum abstracts per ingestion run |
@@ -275,7 +286,7 @@ Faithfulness of 0.91 confirms citation enforcement is working: 91% of answer sta
 
 ### Deterministic retrieval metrics (97 labeled questions, zero variance)
 
-Evaluated against a 97-question oncology benchmark with gold PubMed labels. These metrics use no LLM judge — results are identical across runs.
+Evaluated against a 97-question oncology benchmark with gold PubMed labels. These metrics use no LLM judge, so results are identical across runs.
 
 | Metric | Score |
 |---|---|
@@ -336,7 +347,7 @@ pubmed_rag/
 │   └── questions.sample.jsonl  # 15-question public eval sample
 ├── scripts/
 │   └── eval_v0_2.py        # unified eval driver (RAGAS + deterministic, --questions flag)
-├── tests/                  # pytest unit tests (113 tests, zero external dependencies)
+├── tests/                  # pytest unit tests (220 tests, zero external dependencies)
 ├── docs/
 │   ├── decisions/          # architecture decision records (ADR-033-035, 039-041)
 │   └── known-limitations.md
@@ -395,6 +406,15 @@ If you use this software in your research, please cite it:
   license = {MIT}
 }
 ```
+
+---
+
+## AI usage disclosure
+
+Generative AI tools (Anthropic's Claude) were used to assist with software
+development and documentation for this project. All AI-assisted output was
+reviewed, tested, and validated by the author, who takes full responsibility
+for the content of the software and its documentation.
 
 ---
 

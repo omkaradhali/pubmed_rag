@@ -1,19 +1,20 @@
 """
-parents.py — Sidecar store for parent chunks (v0.2 parent-child schema).
+parents.py — Sidecar store for parent chunks in the parent-child schema.
 
 Parents are not embedded — they live in data/parents.jsonl and are loaded
 into a process-wide dict keyed by chunk_id. retrieve.py uses get_parent()
 to swap a child hit's text for its parent's text before passing context
-to the generator. See D-042 and [[parent-child-chunking-explained]].
+to the generator.
 
 Design notes:
   * ChromaDB requires embeddings on every row, so parents cannot live in
     the same collection without polluting the vector space. Keeping them
-    in a sidecar JSONL is cleaner and matches the helix-rag pattern.
+    in a sidecar JSONL avoids that entirely.
   * The store is lazy-loaded on first call to get_parent(). Tests can
     inject a custom path via load_parents(path) or reset via clear_cache().
-  * For PMC full-text (future) this same module is the swap point — replace
-    the JSONL backend with SQLite or Postgres without changing the public API.
+  * This module is the single swap point for the parent backend — a larger
+    corpus could replace the JSONL file with SQLite or Postgres without
+    changing the public API.
 
 Public API:
     PARENTS_PATH                  — default sidecar path (env-overridable)
@@ -100,8 +101,8 @@ def load_parents(path: str | os.PathLike = PARENTS_PATH) -> dict[str, dict]:
     a re-read.
 
     If the file does not exist, the cache is set to {} so get_parent()
-    raises KeyError consistently instead of FileNotFoundError. This matches
-    the v0.1 corpus state before parents.jsonl exists.
+    raises KeyError consistently instead of FileNotFoundError — the same
+    behaviour as a corpus that has no parents file yet.
     """
     global _cache
     if _cache is not None:

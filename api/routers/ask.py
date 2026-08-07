@@ -37,21 +37,18 @@ async def ask(
     """
     Submit a clinical question and receive a cited answer grounded in PubMed abstracts.
 
+    This is a read-only endpoint: it queries the existing pre-seeded corpus and never
+    modifies it. Rebuilding or refreshing the corpus is an operator task run separately
+    via the pipeline CLI, so a query request can never trigger a slow or destructive
+    corpus rebuild.
+
     **How it works:**
     1. The query is embedded using the same model that indexed the corpus.
     2. A cosine similarity search retrieves the top `n_results` chunks from ChromaDB.
     3. Retrieved chunks are injected into an LLM prompt with citation enforcement.
     4. The LLM generates an answer with inline [N] references — each [N] maps to `sources[N-1]`.
 
-    **Choosing a mode:**
-    - `incremental` (default) — queries the existing pre-seeded corpus. Fast (~1-3 sec,
-      mostly LLM latency). Use this for all normal queries.
-    - `full` — wipes the ChromaDB collection, re-ingests from PubMed, re-embeds, and
-      rebuilds the index before querying. Slow (~2-5 min). Use only to refresh a stale corpus.
-
-    **Refreshing the corpus without a full rebuild:**
-    Set `reldate=30` (or any number of days) with `mode=incremental` to fetch and upsert
-    only the abstracts published in the last N days — faster than a full rebuild.
+    Typical latency is ~1-3 seconds, dominated by the LLM call.
 
     **Interpreting confidence_tier:**
     - `High` — avg cosine similarity ≥ 0.70. Strong corpus coverage for this query.
@@ -61,12 +58,12 @@ async def ask(
 
     **coverage_note:**
     When set, the LLM detected it could not fully answer from the available context.
-    Consider running with `mode=full` or `reldate=N` to refresh the corpus.
+    The corpus may need refreshing by an operator (a separate CLI task).
     """
     # Do not log the raw query: application logs are the one sink that isn't
     # PHI-scrubbed, so keep the clinician's text out of them. request_id ties this
     # line back to the audit record if correlation is needed.
-    logger.info("received query", extra={"mode": body.mode})
+    logger.info("received query")
     settings = get_settings()
 
     async def _audit(status: str, *, result=None, guardrail_results=None) -> None:
@@ -90,11 +87,14 @@ async def ask(
             logger.exception("failed to emit audit record")
 
     try:
+        # Always read-only: mode is fixed to "incremental" with no reldate, so a
+        # query can never wipe or re-ingest the corpus. Corpus rebuilds are an
+        # operator task (pipeline CLI), never reachable from this public endpoint.
         result = await asyncio.to_thread(
             run_pipeline_structured,
             query=body.query,
-            mode=body.mode,
-            reldate=body.reldate,
+            mode="incremental",
+            reldate=None,
             n_results=body.n_results,
             min_score=body.min_score,
         )

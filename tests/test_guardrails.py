@@ -23,7 +23,7 @@ from pubmed_rag.guardrails import (
     run_output_guardrails,
 )
 
-# ── check_topic_relevance ────────────────────────────────────────────────────
+# check_topic_relevance
 
 
 class TestTopicRelevance:
@@ -85,7 +85,7 @@ class TestTopicRelevance:
         assert result.reason != ""
 
 
-# ── check_injection ──────────────────────────────────────────────────────────
+# check_injection
 
 
 class TestInjectionDetection:
@@ -170,7 +170,7 @@ class TestInjectionDetection:
         assert not result.passed
 
 
-# ── check_citations ──────────────────────────────────────────────────────────
+# check_citations
 
 
 class TestCitationCheck:
@@ -227,12 +227,24 @@ class TestCitationCheck:
         assert not result.passed
         assert result.detail["out_of_range"] == [5]
 
+    def test_no_context_phrase_does_not_excuse_out_of_range(self):
+        # A refusal phrase excuses *missing* citations, never an out-of-range one:
+        # an answer that both hedges and cites a nonexistent source must still be
+        # hard-blocked, since the faithfulness checks skip out-of-range cites too.
+        result = check_citations(
+            "The context does not provide dosing data, though [7] is relevant.",
+            n_sources=5,
+        )
+        assert not result.passed
+        assert result.code == GuardrailCode.CITATION_OUT_OF_RANGE
+        assert result.detail["out_of_range"] == [7]
+
     def test_reason_mentions_source_count(self):
         result = check_citations("No citations here at all.", n_sources=5)
         assert "5" in result.reason
 
 
-# ── check_faithfulness ───────────────────────────────────────────────────────
+# check_faithfulness
 
 
 _CHUNK_EGFR = {
@@ -300,7 +312,7 @@ class TestFaithfulnessCheck:
         assert result.passed
 
 
-# ── run_input_guardrails ─────────────────────────────────────────────────────
+# run_input_guardrails
 
 
 class TestRunInputGuardrails:
@@ -335,7 +347,7 @@ class TestRunInputGuardrails:
         assert exc_info.value.result.code == GuardrailCode.OFF_TOPIC
 
 
-# ── run_output_guardrails ────────────────────────────────────────────────────
+# run_output_guardrails
 
 
 class TestRunOutputGuardrails:
@@ -371,7 +383,7 @@ class TestRunOutputGuardrails:
             pytest.fail(f"run_output_guardrails raised unexpectedly: {exc}")
 
 
-# ── is_hard_block ────────────────────────────────────────────────────────────
+# is_hard_block
 
 
 def _low_overlap_result(n_pairs: int) -> GuardrailResult:
@@ -416,7 +428,7 @@ class TestIsHardBlock:
         assert is_hard_block(GuardrailResult(passed=False, code=GuardrailCode.OFF_TOPIC)) is False
 
 
-# ── check_nli_faithfulness ───────────────────────────────────────────────────
+# check_nli_faithfulness
 
 
 class TestNliFaithfulness:
@@ -445,3 +457,15 @@ class TestNliFaithfulness:
             results = run_output_guardrails("Drug is not effective [1].", [_CHUNK_EGFR])
         failed_codes = [r.code for r in results if not r.passed]
         assert GuardrailCode.CONTRADICTS_SOURCE in failed_codes
+
+    def test_degrades_to_pass_when_model_unavailable(self):
+        # If the NLI model can't load or errors at runtime, the check must degrade
+        # to a pass rather than raising — a broken model must not turn every query
+        # into a 500. The other output guardrails still protect grounding.
+        with patch(
+            "pubmed_rag.faithfulness_nli.find_contradictions",
+            side_effect=RuntimeError("model weights not found"),
+        ):
+            result = check_nli_faithfulness("Grounded claim [1].", [_CHUNK_EGFR])
+        assert result.passed
+        assert result.code is None

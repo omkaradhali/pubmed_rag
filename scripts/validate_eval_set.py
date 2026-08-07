@@ -1,8 +1,8 @@
 """
 validate_eval_set.py — integrity checks for the frozen evaluation set.
 
-The frozen 110Q set is PRIVATE (claude-brain), so this script takes the path as
-an argument / env var rather than hardcoding a repo location:
+The frozen 110Q set is kept private (outside this repository), so this script
+takes the path as an argument / env var rather than hardcoding a repo location:
 
   EVAL_QUESTIONS_PATH=/mnt/.../eval100q/questions.jsonl \
       .venv/bin/python scripts/validate_eval_set.py

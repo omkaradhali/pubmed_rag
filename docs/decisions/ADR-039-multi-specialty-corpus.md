@@ -1,7 +1,7 @@
 # ADR-039: Multi-Specialty Corpus Support
 
 **Date:** 2026-05-04
-**Status:** Accepted (design locked; implementation Phase 2)
+**Status:** Accepted (design locked; implementation deferred to a future release)
 
 ## Context
 
