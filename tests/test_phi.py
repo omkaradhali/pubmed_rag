@@ -99,6 +99,29 @@ def test_threshold_invariant_silent_in_band(monkeypatch, caplog):
     assert "safe band" not in caplog.text
 
 
+# Biomedical-token false-positive filter
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["PD-1", "PD-L1", "HER2", "CTLA-4", "TP53", "BRCA1", "EGFR", "KRAS", "MSI-H"],
+)
+def test_biomedical_false_positive_suppressed(token):
+    assert phi._is_biomedical_false_positive("LOCATION", token) is True
+
+
+@pytest.mark.parametrize("token", ["Boston", "New York", "Dana-Farber", "France"])
+def test_real_location_not_suppressed(token):
+    assert phi._is_biomedical_false_positive("LOCATION", token) is False
+
+
+def test_biomedical_filter_only_applies_to_location():
+    # Same shape, different entity type -> never suppressed. The filter must not
+    # accidentally swallow a genuine PERSON/MRN/etc. hit just because its text
+    # happens to look like a gene symbol.
+    assert phi._is_biomedical_false_positive("PERSON", "PD-1") is False
+
+
 # Scrub behavior (real anonymizer, fake analyzer)
 
 
@@ -172,6 +195,18 @@ def test_scrub_phi_replaces_entities(monkeypatch, fake_analyzer):
     assert "4471902" not in scrubbed
     # Non-PHI clinical content is preserved.
     assert "stage IV NSCLC" in scrubbed
+
+
+@pytest.mark.real_phi
+def test_scrub_phi_filters_biomedical_location_false_positive(monkeypatch, fake_analyzer):
+    """A LOCATION hit on a gene/biomarker symbol must not reach the anonymizer."""
+    pytest.importorskip("presidio_anonymizer")
+    phi.reset_engine_cache()
+    monkeypatch.setattr(phi, "should_scrub", lambda: True)
+    monkeypatch.setattr(phi, "get_analyzer", lambda: fake_analyzer([("LOCATION", "PD-1")]))
+
+    text = "What is the mechanism of PD-1 checkpoint inhibition?"
+    assert phi.scrub_phi(text) == text
 
 
 @pytest.mark.real_phi
@@ -262,6 +297,10 @@ def test_scrub_phi_real_model_corpus_and_phi(monkeypatch):
         # EHR-paste identifiers (IP + URL recognizers).
         assert "10.0.0.5" not in phi.scrub_phi("host 10.0.0.5 logged the result")
         assert "hospital.com" not in phi.scrub_phi("see https://portal.hospital.com/patient/9")
+
+        # Regression: biomedical shorthand must survive, not get tagged LOCATION.
+        biomarker_query = "What is the mechanism of PD-1 checkpoint inhibition?"
+        assert phi.scrub_phi(biomarker_query) == biomarker_query
 
         # Singleton is idempotent (double-checked lock returns the same engine).
         assert phi.get_analyzer() is phi.get_analyzer()
