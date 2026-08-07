@@ -17,6 +17,14 @@ class GuardrailFlagResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = Field(description='Service status. "ok" when the API is running.')
     version: str = Field(description="API version string, e.g. 0.1.0.")
+    disclaimer: str = Field(
+        default=(
+            "For research and educational use only. Not a medical device and not "
+            "for clinical decision-making. Outputs are generated from PubMed "
+            "abstracts and may be incomplete or incorrect."
+        ),
+        description="Intended-use notice returned with every health check.",
+    )
 
 
 class AskRequest(BaseModel):

@@ -35,7 +35,21 @@ async def lifespan(app: FastAPI):
     logger.info("pubmed_rag API stopped")
 
 
-app = FastAPI(title="pubmed_rag", version=__version__, lifespan=lifespan)
+app = FastAPI(
+    title="pubmed_rag",
+    version=__version__,
+    description=(
+        "Retrieval-augmented question answering over PubMed abstracts.\n\n"
+        "**For research and educational use only.** pubmed_rag is not a medical "
+        "device, is not FDA-cleared, and must not be used for diagnosis, treatment, "
+        "or clinical decision-making. Answers are generated from abstract text and "
+        "may be incomplete or incorrect. The HL7 CDS Hooks endpoints are experimental "
+        "and unvalidated. Do not send protected health information (PHI) unless the "
+        "service is deployed fully locally (Ollama plus a local embedding model). "
+        "See the README and docs/known-limitations.md."
+    ),
+    lifespan=lifespan,
+)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

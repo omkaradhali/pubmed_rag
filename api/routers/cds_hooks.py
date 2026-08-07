@@ -40,7 +40,7 @@ _SOURCE_URL = "https://pubmed.ncbi.nlm.nih.gov"
 _SUMMARY_LIMIT = 140  # CDS Hooks spec recommends ≤140 chars for summary
 
 
-# ── CDS Hooks request schema ──────────────────────────────────────────────────
+# CDS Hooks request schema
 
 
 class CDSContext(BaseModel):
@@ -80,7 +80,7 @@ class CDSHookRequest(BaseModel):
     model_config = {"extra": "allow"}
 
 
-# ── CDS Hooks response schema ─────────────────────────────────────────────────
+# CDS Hooks response schema
 
 
 class CDSLink(BaseModel):
@@ -127,7 +127,7 @@ class CDSHookResponse(BaseModel):
     cards: list[CDSCard] = Field(description="Cards to display in the EHR.")
 
 
-# ── Discovery endpoint ────────────────────────────────────────────────────────
+# Discovery endpoint
 
 
 class CDSService(BaseModel):
@@ -150,7 +150,8 @@ class CDSServicesResponse(BaseModel):
     summary="CDS service discovery",
     description=(
         "Returns the list of CDS Hooks services provided by this API. "
-        "EHR systems call this endpoint on startup to discover available services."
+        "EHR systems call this endpoint on startup to discover available services. "
+        "This integration is experimental and unvalidated, and is not for clinical use."
     ),
 )
 def get_cds_services() -> CDSServicesResponse:
@@ -158,8 +159,9 @@ def get_cds_services() -> CDSServicesResponse:
         services=[
             CDSService(
                 hook="patient-view",
-                title="Oncology Evidence Search (pubmed_rag)",
+                title="Oncology Evidence Search (pubmed_rag, experimental)",
                 description=(
+                    "EXPERIMENTAL and unvalidated, not for clinical use. "
                     "Search 35M+ PubMed oncology abstracts and receive a cited, "
                     "LLM-synthesised evidence summary for the current clinical question. "
                     "Provide the clinical question in context.query."
@@ -170,7 +172,7 @@ def get_cds_services() -> CDSServicesResponse:
     )
 
 
-# ── Service endpoint ──────────────────────────────────────────────────────────
+# Service endpoint
 
 
 @router.post(
