@@ -1,0 +1,10 @@
+flowchart TD
+    Q["query"] --> GI["guardrails.py (INPUT)<br/>topic relevance check<br/>injection detection"]
+    GI -->|"off-topic or injection"| X1(["422 early exit"])
+    GI -->|"pass"| R["retrieve.py"]
+    R --> RB["dense search: ChromaDB cosine similarity, top-k<br/>optional hybrid BM25+RRF (entity-gated, opt-in)<br/>Gate 1: entity detected in query<br/>Gate 2: top BM25 score above 90.0"]
+    RB --> RR["rerank.py<br/>ncbi/MedCPT-Cross-Encoder<br/>re-scores (query, child) pairs, top-5"]
+    RR --> P["parents.py<br/>resolve child hits to full parent text"]
+    P --> GEN["generate.py<br/>citation-enforced LLM prompt"]
+    GEN --> GO["guardrails.py (OUTPUT)<br/>citation check: no citation markers, flag<br/>faithfulness check: Jaccard below 0.05, flag"]
+    GO --> RES["PipelineResult<br/>answer, sources, guardrail_flags"]
