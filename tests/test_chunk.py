@@ -70,6 +70,7 @@ _EXPECTED_KEYS = {
     "journal",
     "publication_types",
     "mesh_terms",
+    "specialty",
     "text",
     "chunk_index",
     "chunk_total",

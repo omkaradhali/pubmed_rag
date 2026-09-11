@@ -191,6 +191,7 @@ class TestRetrieve:
             "authors",
             "publication_types",
             "mesh_terms",
+            "specialty",
             "chunk_id",
             "parent_id",
             "chunk_index",
@@ -343,11 +344,9 @@ class TestBM25IndexThreadSafety:
     @pytest.fixture(autouse=True)
     def _reset_bm25_cache(self):
         # Ensure every test starts cold, and leave the module clean afterwards.
-        retrieve_module._bm25_index = None
-        retrieve_module._bm25_parents = []
+        retrieve_module._bm25_cache.clear()
         yield
-        retrieve_module._bm25_index = None
-        retrieve_module._bm25_parents = []
+        retrieve_module._bm25_cache.clear()
 
     def test_concurrent_cold_start_builds_index_once(self):
         n_threads = 8
@@ -412,7 +411,7 @@ class TestBM25IndexThreadSafety:
             assert parents1 is first
 
             parents_module.clear_cache()  # fires _reset_bm25_cache hook
-            assert retrieve_module._bm25_index is None  # invalidated
+            assert retrieve_module._bm25_cache == {}  # invalidated
 
             _, parents2 = retrieve_module._get_bm25_index()
             assert parents2 is second  # rebuilt from the reloaded corpus
