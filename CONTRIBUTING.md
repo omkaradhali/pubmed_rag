@@ -105,7 +105,7 @@ Example: `feat: add hybrid BM25 + vector search to retrieve.py`
 - Keep each PR focused on one concern.
 - Add tests for new public functions.
 - Run `pytest` and `ruff check` before opening a PR.
-- If you're making a significant architecture decision, add an ADR to `docs/decisions/` following the existing format.
+- If you're making a significant architecture decision, document it in `docs/decisions/` following the existing format.
 
 ---
 

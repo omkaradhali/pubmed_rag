@@ -1,4 +1,4 @@
-# ADR-041: Dynamic hybrid BM25+dense+RRF with entity-based routing
+# Dynamic hybrid BM25+dense+RRF with entity-based routing
 
 **Date:** 2026-06-28
 **Status:** Accepted
@@ -67,6 +67,5 @@ The reranker alone (MRR=0.950) outperforms dense+hybrid+rerank (MRR=0.938) on th
 ## Consequences
 
 - Dynamic routing recovers most of the recall regression from naive hybrid (0.796 → 0.903) without degrading conceptual question performance.
-- The BM25 threshold (90.0) is calibrated on the current 5K-abstract oncology corpus. If the corpus composition changes substantially, recalibrate by inspecting the score distribution with `--debug-bm25`.
-- The in-memory BM25 index does not survive process restarts without reloading `parents.jsonl`. For large corpora (v2.0+), replace with Atlas `$search` (Lucene) which persists natively and scales horizontally.
-- Hybrid is the correct default for v2.0 (MongoDB Atlas) where the query workload may be more entity-heavy. The current `rank_bm25` implementation is the self-hosted scaffold; Atlas `$rankFusion` replaces it in v2.0.
+- The BM25 threshold (90.0) is calibrated on the current 5K-abstract oncology corpus. If the corpus composition changes substantially, recalibrate by inspecting the score distribution directly.
+- The in-memory BM25 index (`rank_bm25`) does not survive process restarts — it's rebuilt from `parents.jsonl` on first use each time the process starts. Fine at the current corpus size (well under a second); at much larger scale this becomes a real startup cost, and a persisted index would be worth revisiting then.

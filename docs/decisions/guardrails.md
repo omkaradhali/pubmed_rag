@@ -1,4 +1,4 @@
-# ADR-040: Deterministic input/output guardrails
+# Deterministic input/output guardrails
 
 **Date:** 2026-06-29
 **Status:** Accepted

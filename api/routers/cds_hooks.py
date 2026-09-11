@@ -162,7 +162,7 @@ def get_cds_services() -> CDSServicesResponse:
                 title="Oncology Evidence Search (pubmed_rag, experimental)",
                 description=(
                     "EXPERIMENTAL and unvalidated, not for clinical use. "
-                    "Search 35M+ PubMed oncology abstracts and receive a cited, "
+                    "Search indexed PubMed oncology abstracts and receive a cited, "
                     "LLM-synthesised evidence summary for the current clinical question. "
                     "Provide the clinical question in context.query."
                 ),
@@ -201,7 +201,7 @@ async def pubmed_rag_service(request: CDSHookRequest) -> CDSHookResponse:
                     summary="Specify a clinical question to search PubMed evidence",
                     detail=(
                         "Provide a clinical question in `context.query` to receive an "
-                        "evidence summary from 35M+ PubMed oncology abstracts.\n\n"
+                        "evidence summary from indexed PubMed oncology abstracts.\n\n"
                         "**Example:** "
                         "*'What is the first-line treatment for HER2-positive "
                         "metastatic breast cancer?'*"

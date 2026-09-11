@@ -46,8 +46,9 @@ _logger = logging.getLogger(__name__)
 
 # Constants
 
-# ADR-039: multi-specialty corpus support. Maps a short specialty name to its
-# Entrez search string. Both entries use a MeSH disease/subject-matter heading
+# Multi-specialty corpus support (docs/decisions/multi-specialty-corpus.md).
+# Maps a short specialty name to its Entrez search string. Both entries use a
+# MeSH disease/subject-matter heading
 # (not a "field of study" heading like "Oncology[MeSH]" or "Neurosciences[MeSH]")
 # deliberately: disease-category headings roll up thousands of subheadings
 # hierarchically and index actual research output, while field-of-study
@@ -400,7 +401,8 @@ def ingest(
         max_results: Number of abstracts to fetch.
         reldate:     If set, restrict to articles indexed in the last N days.
         specialty:   If set, tag every returned record with this value (see
-                     ADR-039). Stamped here rather than left for the caller to
+                     docs/decisions/multi-specialty-corpus.md). Stamped here
+                     rather than left for the caller to
                      add, so a record's specialty is always set at the moment
                      it's known to have come from that specialty's query —
                      chunk.py, vectorstore.py, and retrieve.py all propagate

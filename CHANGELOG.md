@@ -32,10 +32,9 @@ Initial release.
 ### Added
 - Full ingestion pipeline: PubMed E-utilities → chunking → sentence-transformer embeddings → ChromaDB
 - Citation-enforced generation with pluggable LLM providers (Ollama, Anthropic, OpenAI)
-- Pluggable vector store backend: ChromaDB (dev) / Qdrant (production)
 - FastAPI backend with request ID tracing, JSON structured logging, and Swagger UI
 - RAGAS evaluation suite with 20 clinical oncology questions
 - Docker image with pre-baked `all-MiniLM-L6-v2` model weights
 - GitHub Actions CI with lint and tests
-- 7 Architecture Decision Records (ADR-033 through ADR-039)
+- Documented design decisions in `docs/decisions/`
 - CITATION.cff for academic citation

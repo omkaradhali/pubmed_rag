@@ -111,10 +111,11 @@ def _bibliographic_fields(record: dict) -> dict:
         "journal": record.get("journal", ""),
         "publication_types": record.get("publication_types", []),
         "mesh_terms": record.get("mesh_terms", []),
-        # ADR-039: which specialty's ingest run produced this record ("oncology",
-        # "neuroscience", ...). "" for records ingested before multi-specialty
-        # support existed, or via a raw query that didn't go through
-        # ingest.py's specialty param — retrieve.py treats "" as "no specialty
+        # Which specialty's ingest run produced this record ("oncology",
+        # "neuroscience", ...) — see docs/decisions/multi-specialty-corpus.md.
+        # "" for records ingested before multi-specialty support existed, or
+        # via a raw query that didn't go through ingest.py's specialty param —
+        # retrieve.py treats "" as "no specialty
         # filter matches this chunk" rather than crashing on a missing key.
         "specialty": record.get("specialty", ""),
     }

@@ -63,7 +63,9 @@ _SEP = "-" * 62
 
 
 def _resolve_ingest_query(specialty: str | None) -> str:
-    """Resolve a specialty name to its Entrez query string (ADR-039).
+    """Resolve a specialty name to its Entrez query string.
+
+    See docs/decisions/multi-specialty-corpus.md.
 
     Falls back to the INGEST_QUERY env default when specialty is None, so
     existing single-corpus callers that never pass specialty keep working
@@ -125,7 +127,7 @@ class SourceChunk:
     chunk_index: int  # 0-based position of this chunk within its abstract
     chunk_total: int  # total chunks produced from this abstract
     text: str  # the actual chunk text (abstract excerpt used as LLM context)
-    specialty: str = ""  # ADR-039 specialty tag, e.g. "oncology"; "" if untagged
+    specialty: str = ""  # multi-specialty tag, e.g. "oncology"; "" if untagged
 
 
 @dataclass
@@ -324,7 +326,7 @@ def run_pipeline_structured(
         reldate:   Restrict ingest to abstracts indexed in the last N days.
         n_results: Number of chunks to retrieve (default: 5).
         min_score: Minimum cosine similarity threshold (default: 0.0).
-        specialty: ADR-039 filter, e.g. "oncology". None searches every
+        specialty: Multi-specialty filter, e.g. "oncology". None searches every
                    specialty in the corpus. When mode="full" or an
                    incremental ingest runs (reldate set), also selects which
                    SPECIALTY_QUERIES entry to ingest from and tags the new
@@ -478,7 +480,7 @@ def run_pipeline(
         n_results: Chunks to retrieve (default: 5).
         min_score: Minimum similarity threshold (default: 0.0).
         verbose:   Include MeSH terms and abstract excerpts in source listings.
-        specialty: ADR-039 filter/ingest-query selector, e.g. "oncology".
+        specialty: Multi-specialty filter/ingest-query selector, e.g. "oncology".
 
     Returns:
         Formatted multi-line string with answer, sources, and metadata footer.
@@ -502,7 +504,7 @@ def _run_full_ingest(reldate: int | None = None, specialty: str | None = None) -
     and parents.jsonl unconditionally, regardless of what specialty (if any)
     is passed. Calling this a second time with a different specialty destroys
     the first specialty's corpus rather than adding to it. To build a corpus
-    spanning multiple specialties (ADR-039), ingest each one via
+    spanning multiple specialties, ingest each one via
     _run_incremental_update (append-only) instead — never call this more than
     once against the same corpus.
     """
@@ -567,12 +569,12 @@ def _run_incremental_update(reldate: int, specialty: str | None = None) -> None:
     only written during a full rebuild.
 
     Append-only, so this is also the safe way to build a multi-specialty
-    corpus (ADR-039): call once per specialty, each tagging its own records,
-    and none of them touch what an earlier call already added.
+    corpus: call once per specialty, each tagging its own records, and none
+    of them touch what an earlier call already added.
 
     Args:
         reldate:   Restrict to abstracts indexed in the last N days.
-        specialty: ADR-039 specialty to ingest and tag new records with.
+        specialty: Specialty to ingest and tag new records with.
                    None falls back to the INGEST_QUERY env default with no tag.
     """
     query = _resolve_ingest_query(specialty)
@@ -650,7 +652,7 @@ if __name__ == "__main__":
         "--specialty",
         choices=sorted(SPECIALTY_QUERIES),
         default=None,
-        help="ADR-039 specialty to ingest from/retrieve within. Omit to use "
+        help="Specialty to ingest from/retrieve within. Omit to use "
         "INGEST_QUERY (ingest) or search all specialties (retrieve).",
     )
     args = parser.parse_args()

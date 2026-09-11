@@ -34,7 +34,7 @@ questions grounded in retrieved papers with inline citations.
 - [Evaluation](#evaluation)
 - [Project Structure](#project-structure)
 - [Docker](#docker)
-- [Architecture Decision Records](#architecture-decision-records)
+- [Design Decisions](#design-decisions)
 - [Contributing](#contributing)
 - [Citation](#citation)
 - [License](#license)
@@ -54,7 +54,6 @@ questions grounded in retrieved papers with inline citations.
 - **FastAPI backend:** structured JSON responses, request ID tracing, Swagger docs at `/docs`
 - **Dual evaluation suite:** RAGAS (LLM-as-judge) and deterministic recall@k/MRR/nDCG against a 97-question labeled benchmark
 - **Docker and CI:** ready-to-run Docker image and GitHub Actions workflow included
-- **Production path:** swap ChromaDB → Qdrant and `all-MiniLM-L6-v2` → `text-embedding-3-small` with two env var changes
 
 ---
 
@@ -64,7 +63,7 @@ questions grounded in retrieved papers with inline citations.
 
 <div align="center">
 
-<img src="docs/img/architecture-ingestion.svg" alt="Ingestion pipeline: PubMed E-utilities to ingest.py to abstracts.jsonl, chunked into parents and child chunks, embedded, and indexed in ChromaDB or Qdrant" width="360">
+<img src="docs/img/architecture-ingestion.svg" alt="Ingestion pipeline: PubMed E-utilities to ingest.py to abstracts.jsonl, chunked into parents and child chunks, embedded, and indexed in ChromaDB" width="360">
 
 <sub>Source: <a href="docs/img/architecture-ingestion.mmd">architecture-ingestion.mmd</a></sub>
 
@@ -95,7 +94,7 @@ The pipeline runs in two modes:
 > **Research and educational use only.** pubmed_rag is not a medical device, is not FDA-cleared, and is not intended for diagnosis, treatment, or any clinical decision-making. Answers are generated from abstract text and may be incomplete or wrong. Always defer to a qualified clinician and to primary sources.
 
 - **Not a medical device.** No output should be used to guide patient care. There is no regulatory clearance and no warranty of clinical accuracy.
-- **The corpus is a bounded snapshot.** The system answers only from PubMed *abstracts* (not full text), for the specialty and time window you ingest (`PUBMED_SPECIALTY`, `PUBMED_YEARS_BACK`; default oncology, last 10 years). It does not auto-refresh, so answers reflect the literature as of your last ingestion run and anything published after that date is absent.
+- **The corpus is a bounded snapshot.** The system answers only from PubMed *abstracts* (not full text), for whatever `INGEST_QUERY` (or `--specialty`, for multi-specialty deployments — see [docs/decisions/multi-specialty-corpus.md](docs/decisions/multi-specialty-corpus.md)) you ingested. It does not auto-refresh, so answers reflect the literature as of your last ingestion run and anything published after that date is absent.
 - **PHI stays local.** Query de-identification (Presidio) is best-effort defense in depth, **not** a HIPAA Safe Harbor guarantee. For any workflow that may involve real patient data, run the fully local stack (`LLM_PROVIDER=ollama` plus a local embedder, `miniml` or `medcpt`) so no text leaves the server. Do not send PHI to cloud providers.
 - **HL7 CDS Hooks integration is experimental.** The `/cds-services` endpoints are a functional reference implementation of the spec, unvalidated in any live EHR and not for clinical use.
 
@@ -195,8 +194,8 @@ curl http://localhost:8001/cds-services
 {
   "services": [{
     "hook": "patient-view",
-    "title": "Oncology Evidence Search (pubmed_rag)",
-    "description": "Search 35M+ PubMed oncology abstracts and receive a cited, LLM-synthesised evidence summary.",
+    "title": "Oncology Evidence Search (pubmed_rag, experimental)",
+    "description": "EXPERIMENTAL and unvalidated, not for clinical use. Search indexed PubMed oncology abstracts and receive a cited, LLM-synthesised evidence summary for the current clinical question. Provide the clinical question in context.query.",
     "id": "pubmed-rag",
     "prefetch": {}
   }]
@@ -255,14 +254,9 @@ Copy `.env.example` to `.env`. All variables have sensible defaults for local de
 | `ANTHROPIC_API_KEY` | `(none)` | Required when `LLM_PROVIDER=anthropic` |
 | `OPENAI_API_KEY` | `(none)` | Required when `LLM_PROVIDER=openai` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API endpoint |
-| `VECTOR_STORE_BACKEND` | `chroma` | Vector store: `chroma` (local, zero config) or `qdrant` (production) |
 | `CHROMA_PERSIST_DIR` | `./data/chroma_db` | ChromaDB persistence directory |
-| `QDRANT_URL` | `(none)` | Qdrant endpoint, required when the backend is `qdrant` |
-| `QDRANT_API_KEY` | `(none)` | Qdrant API key |
-| `EMBEDDING_PROVIDER` | `miniml` | Embedding model: `miniml` (all-MiniLM, local), `medcpt` (biomedical, local), or `openai` |
-| `PUBMED_SPECIALTY` | `oncology` | Corpus specialty, maps to a MeSH search string |
-| `PUBMED_YEARS_BACK` | `10` | Years of PubMed literature to include in the corpus |
-| `INGEST_QUERY` | `oncology[Title/Abstract]` | PubMed search string for corpus ingestion |
+| `EMBEDDING_PROVIDER` | `miniml` | Embedding model: `miniml` (all-MiniLM, local), `bge` (stronger, local), or `medcpt` (biomedical, local) |
+| `INGEST_QUERY` | `oncology[Title/Abstract]` | PubMed search string for corpus ingestion (fallback when no `--specialty` flag is passed) |
 | `INGEST_MAX_RESULTS` | `500` | Maximum abstracts per ingestion run |
 | `LOG_LEVEL` | `INFO` | API log level |
 
@@ -322,7 +316,7 @@ pubmed_rag/
 │   ├── ingest.py           # PubMed E-utilities fetcher
 │   ├── chunk.py            # parent-child RecursiveCharacterTextSplitter
 │   ├── embed.py            # sentence-transformer embedder (pluggable provider)
-│   ├── vectorstore.py      # ChromaDB / Qdrant abstraction
+│   ├── vectorstore.py      # ChromaDB persistence and retrieval
 │   ├── parents.py          # parent-doc sidecar JSONL store + lazy-load cache
 │   ├── retrieve.py         # dense retrieval + optional BM25+RRF hybrid
 │   ├── rerank.py           # ncbi/MedCPT-Cross-Encoder reranker
@@ -349,7 +343,7 @@ pubmed_rag/
 │   └── eval_v0_2.py        # unified eval driver (RAGAS + deterministic, --questions flag)
 ├── tests/                  # pytest unit tests (220 tests, zero external dependencies)
 ├── docs/
-│   ├── decisions/          # architecture decision records (ADR-033-035, 039-041)
+│   ├── decisions/          # design decision docs
 │   └── known-limitations.md
 ├── Dockerfile
 ├── docker-compose.yml
@@ -372,18 +366,15 @@ The Docker image pre-bakes the `all-MiniLM-L6-v2` model weights to avoid downloa
 
 ---
 
-## Architecture Decision Records
+## Design Decisions
 
-Design decisions for the open-source architecture are documented in `docs/decisions/`:
+Notable architecture decisions are documented in `docs/decisions/`:
 
-| ADR | Decision |
+| Decision | Summary |
 |---|---|
-| [ADR-033](docs/decisions/ADR-033-vector-store-backend.md) | Pluggable vector store: ChromaDB (dev) / Qdrant (prod) |
-| [ADR-034](docs/decisions/ADR-034-embedding-provider.md) | Pluggable embedding: all-MiniLM (dev) / text-embedding-3-small (prod) |
-| [ADR-035](docs/decisions/ADR-035-corpus-scope.md) | Corpus scope: oncology default, configurable depth |
-| [ADR-039](docs/decisions/ADR-039-multi-specialty-corpus.md) | Multi-specialty support via metadata filter |
-| [ADR-040](docs/decisions/ADR-040-guardrails.md) | Deterministic input/output guardrails: pattern-based, no LLM cost |
-| [ADR-041](docs/decisions/ADR-041-hybrid-bm25-rrf.md) | Dynamic hybrid BM25+dense+RRF: entity-gated, dense-only default |
+| [Multi-specialty corpus](docs/decisions/multi-specialty-corpus.md) | Serve several specialties (oncology, neuroscience, ...) from one deployment via a metadata filter, not separate corpora |
+| [Guardrails](docs/decisions/guardrails.md) | Deterministic input/output guardrails: pattern-based, no LLM cost |
+| [Hybrid BM25+dense+RRF](docs/decisions/hybrid-bm25-rrf.md) | Dynamic hybrid search: entity-gated, dense-only default |
 
 ---
 
