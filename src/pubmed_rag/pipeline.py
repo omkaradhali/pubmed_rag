@@ -40,7 +40,7 @@ from pubmed_rag.guardrails import (
     run_input_guardrails,
     run_output_guardrails,
 )
-from pubmed_rag.ingest import ingest, save_to_jsonl
+from pubmed_rag.ingest import SPECIALTY_QUERIES, ingest, save_to_jsonl
 from pubmed_rag.parents import append_parents, save_parents
 from pubmed_rag.phi import scrub_phi
 from pubmed_rag.retrieve import retrieve
@@ -60,6 +60,23 @@ INGEST_QUERY = os.getenv("INGEST_QUERY", "oncology[Title/Abstract]")
 INGEST_MAX_RESULTS = int(os.getenv("INGEST_MAX_RESULTS", "500"))
 
 _SEP = "-" * 62
+
+
+def _resolve_ingest_query(specialty: str | None) -> str:
+    """Resolve a specialty name to its Entrez query string (ADR-039).
+
+    Falls back to the INGEST_QUERY env default when specialty is None, so
+    existing single-corpus callers that never pass specialty keep working
+    unchanged.
+
+    Raises:
+        KeyError: specialty isn't a key in ingest.SPECIALTY_QUERIES — a typo
+            here should fail loudly, not silently ingest the wrong corpus.
+    """
+    if specialty is None:
+        return INGEST_QUERY
+    return SPECIALTY_QUERIES[specialty]
+
 
 # Returned to the caller when a grounded, properly-cited answer cannot be
 # produced even after one corrective retry. Never surface an uncited answer.
@@ -108,6 +125,7 @@ class SourceChunk:
     chunk_index: int  # 0-based position of this chunk within its abstract
     chunk_total: int  # total chunks produced from this abstract
     text: str  # the actual chunk text (abstract excerpt used as LLM context)
+    specialty: str = ""  # ADR-039 specialty tag, e.g. "oncology"; "" if untagged
 
 
 @dataclass
@@ -292,6 +310,7 @@ def run_pipeline_structured(
     reldate: int | None = None,
     n_results: int = 5,
     min_score: float = 0.0,
+    specialty: str | None = None,
 ) -> PipelineResult:
     """
     Run the RAG pipeline and return a fully structured PipelineResult.
@@ -305,6 +324,11 @@ def run_pipeline_structured(
         reldate:   Restrict ingest to abstracts indexed in the last N days.
         n_results: Number of chunks to retrieve (default: 5).
         min_score: Minimum cosine similarity threshold (default: 0.0).
+        specialty: ADR-039 filter, e.g. "oncology". None searches every
+                   specialty in the corpus. When mode="full" or an
+                   incremental ingest runs (reldate set), also selects which
+                   SPECIALTY_QUERIES entry to ingest from and tags the new
+                   records with it.
 
     Returns:
         PipelineResult with all fields populated.
@@ -322,10 +346,10 @@ def run_pipeline_structured(
 
     if mode == "full":
         _logger.info("Mode: full — rebuilding corpus from scratch.")
-        _run_full_ingest(reldate=reldate)
+        _run_full_ingest(reldate=reldate, specialty=specialty)
     elif reldate is not None:
         _logger.info("Mode: incremental — appending last %d days of abstracts.", reldate)
-        _run_incremental_update(reldate=reldate)
+        _run_incremental_update(reldate=reldate, specialty=specialty)
     else:
         _logger.info("Mode: incremental — querying existing collection.")
 
@@ -333,7 +357,7 @@ def run_pipeline_structured(
     # the query may still contain PHI. Keep it out of application logs entirely
     # (matches the API layer's "never log the raw query" posture).
     _logger.info("Retrieving top-%d chunks.", n_results)
-    chunks = retrieve(query, n_results=n_results, min_score=min_score)
+    chunks = retrieve(query, n_results=n_results, min_score=min_score, specialty=specialty)
 
     # Generate with grounding enforcement: retry once on a citation/faithfulness
     # hard block, then substitute the safe fallback rather than surface an
@@ -366,6 +390,7 @@ def run_pipeline_structured(
             chunk_index=c["chunk_index"],
             chunk_total=c["chunk_total"],
             text=c["text"],
+            specialty=c.get("specialty", ""),
         )
         for i, c in enumerate(chunks)
     ]
@@ -438,6 +463,7 @@ def run_pipeline(
     n_results: int = 5,
     min_score: float = 0.0,
     verbose: bool = False,
+    specialty: str | None = None,
 ) -> str:
     """
     Run the RAG pipeline and return a formatted string for CLI output.
@@ -452,6 +478,7 @@ def run_pipeline(
         n_results: Chunks to retrieve (default: 5).
         min_score: Minimum similarity threshold (default: 0.0).
         verbose:   Include MeSH terms and abstract excerpts in source listings.
+        specialty: ADR-039 filter/ingest-query selector, e.g. "oncology".
 
     Returns:
         Formatted multi-line string with answer, sources, and metadata footer.
@@ -462,13 +489,23 @@ def run_pipeline(
         reldate=reldate,
         n_results=n_results,
         min_score=min_score,
+        specialty=specialty,
     )
     return format_pipeline_output(result, verbose=verbose)
 
 
 # Private helpers
-def _run_full_ingest(reldate: int | None = None) -> None:
-    """Wipe existing corpus and rebuild: ingest → chunk → save parents → embed children → seed."""
+def _run_full_ingest(reldate: int | None = None, specialty: str | None = None) -> None:
+    """Wipe existing corpus and rebuild: ingest → chunk → save parents → embed children → seed.
+
+    WARNING — not multi-specialty-safe: this wipes chroma_db, abstracts.jsonl,
+    and parents.jsonl unconditionally, regardless of what specialty (if any)
+    is passed. Calling this a second time with a different specialty destroys
+    the first specialty's corpus rather than adding to it. To build a corpus
+    spanning multiple specialties (ADR-039), ingest each one via
+    _run_incremental_update (append-only) instead — never call this more than
+    once against the same corpus.
+    """
     for path in (ABSTRACTS_PATH, EMBEDDINGS_PATH, PARENTS_PATH):
         if path.exists():
             path.unlink()
@@ -481,8 +518,14 @@ def _run_full_ingest(reldate: int | None = None) -> None:
         shutil.rmtree(CHROMA_DIR)
         _logger.info("Wiped chroma_db at %s", CHROMA_DIR)
 
-    _logger.info("Ingesting up to %d abstracts (reldate=%s)...", INGEST_MAX_RESULTS, reldate)
-    records = ingest(INGEST_QUERY, max_results=INGEST_MAX_RESULTS, reldate=reldate)
+    query = _resolve_ingest_query(specialty)
+    _logger.info(
+        "Ingesting up to %d abstracts (reldate=%s, specialty=%r)...",
+        INGEST_MAX_RESULTS,
+        reldate,
+        specialty,
+    )
+    records = ingest(query, max_results=INGEST_MAX_RESULTS, reldate=reldate, specialty=specialty)
     _logger.info("Fetched %d records.", len(records))
 
     if not records:
@@ -507,7 +550,7 @@ def _run_full_ingest(reldate: int | None = None) -> None:
     _logger.info("Seeded %d children into ChromaDB.", n_seeded)
 
 
-def _run_incremental_update(reldate: int) -> None:
+def _run_incremental_update(reldate: int, specialty: str | None = None) -> None:
     """
     Fetch abstracts from the last N days and upsert into the existing collection.
 
@@ -522,8 +565,20 @@ def _run_incremental_update(reldate: int) -> None:
     snapshot and would accumulate duplicates across repeated incremental runs.
     ChromaDB + parents.jsonl are the authoritative state; abstracts.jsonl is
     only written during a full rebuild.
+
+    Append-only, so this is also the safe way to build a multi-specialty
+    corpus (ADR-039): call once per specialty, each tagging its own records,
+    and none of them touch what an earlier call already added.
+
+    Args:
+        reldate:   Restrict to abstracts indexed in the last N days.
+        specialty: ADR-039 specialty to ingest and tag new records with.
+                   None falls back to the INGEST_QUERY env default with no tag.
     """
-    new_records = ingest(INGEST_QUERY, max_results=INGEST_MAX_RESULTS, reldate=reldate)
+    query = _resolve_ingest_query(specialty)
+    new_records = ingest(
+        query, max_results=INGEST_MAX_RESULTS, reldate=reldate, specialty=specialty
+    )
 
     if not new_records:
         _logger.info("No new abstracts in the last %d days.", reldate)
@@ -591,6 +646,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Include MeSH terms and abstract excerpts in source listings.",
     )
+    parser.add_argument(
+        "--specialty",
+        choices=sorted(SPECIALTY_QUERIES),
+        default=None,
+        help="ADR-039 specialty to ingest from/retrieve within. Omit to use "
+        "INGEST_QUERY (ingest) or search all specialties (retrieve).",
+    )
     args = parser.parse_args()
 
     output = run_pipeline(
@@ -600,6 +662,7 @@ if __name__ == "__main__":
         n_results=args.n_results,
         min_score=args.min_score,
         verbose=args.verbose,
+        specialty=args.specialty,
     )
 
     print("\n" + output)

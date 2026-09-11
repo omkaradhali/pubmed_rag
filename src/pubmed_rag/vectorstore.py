@@ -153,6 +153,9 @@ def _chunk_to_metadata(c: dict) -> dict:
         # Chunk position within the parent
         "chunk_index": c.get("chunk_index", 0),
         "chunk_total": c.get("chunk_total", 1),
+        # ADR-039: multi-specialty filter key, e.g. "oncology"/"neuroscience".
+        # "" for chunks predating multi-specialty support.
+        "specialty": c.get("specialty", ""),
     }
 
 

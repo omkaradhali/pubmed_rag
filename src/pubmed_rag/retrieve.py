@@ -113,13 +113,16 @@ _RE_TRIAL = re.compile(r"\b(?:NCT\d+|KEYNOTE-\d+|CheckMate-\d+|IMpower\d+)\b", r
 # Common biomarker abbreviations in oncology.
 _RE_BIOMARKER = re.compile(r"\b(?:MSI-[HL]|dMMR|pMMR|TMB|HER2|PD-L1|CTLA-4|PD-1|CDK4|CDK6)\b")
 
-# BM25 module-level cache — built lazily on first hybrid query, then reused.
-# Invalidated whenever clear_cache() is called on the parents module.
+# BM25 module-level cache — built lazily on first hybrid query per specialty,
+# then reused. Keyed by the specialty filter each query used (None = no
+# filter, indexed over every parent) since BM25Okapi has no notion of
+# metadata filtering itself — the only way to scope it to one specialty is a
+# separate index built over just that specialty's parents. Invalidated
+# whenever clear_cache() is called on the parents module.
 # _bm25_lock guards the lazy build: FastAPI runs the pipeline in a thread pool,
 # so concurrent cold-start requests could otherwise build competing indices and
-# leave _bm25_index / _bm25_parents mismatched.
-_bm25_index: BM25Okapi | None = None
-_bm25_parents: list[dict] = []
+# leave a cache entry's index/parents mismatched.
+_bm25_cache: dict[str | None, tuple[BM25Okapi, list[dict]]] = {}
 _bm25_lock = threading.Lock()
 
 
@@ -158,59 +161,69 @@ def _should_use_bm25(query: str, bm25_top_score: float) -> bool:
     return bm25_top_score > BM25_SCORE_THRESHOLD
 
 
-def _get_bm25_index() -> tuple["BM25Okapi", list[dict]]:
-    """Lazy-build and cache the BM25 index over all parent texts.
+def _get_bm25_index(specialty: str | None = None) -> tuple["BM25Okapi", list[dict]]:
+    """Lazy-build and cache the BM25 index over parent texts, optionally scoped
+    to one specialty.
 
-    Called on the first hybrid query; subsequent calls return the cached index.
-    Tokenisation is whitespace + lowercase — fast and sufficient for biomedical
-    term matching where exact spelling matters (drug names, gene symbols, IDs).
+    Called on the first hybrid query for a given specialty; subsequent calls
+    with the same specialty (including None, meaning "all") return the cached
+    index. Tokenisation is whitespace + lowercase — fast and sufficient for
+    biomedical term matching where exact spelling matters (drug names, gene
+    symbols, IDs).
     """
-    global _bm25_index, _bm25_parents
-    # Fast path: index already built. No lock needed — a non-None _bm25_index is
-    # only ever published together with its matching _bm25_parents (see below).
-    if _bm25_index is not None:
-        return _bm25_index, _bm25_parents
+    # Fast path: this specialty's index already built. No lock needed — a
+    # cache entry is only ever published as a complete (index, parents) pair.
+    cached = _bm25_cache.get(specialty)
+    if cached is not None:
+        return cached
 
     with _bm25_lock:
-        # Double-check inside the lock: another thread may have built the index
-        # while we waited to acquire it.
-        if _bm25_index is not None:
-            return _bm25_index, _bm25_parents
+        # Double-check inside the lock: another thread may have built this
+        # specialty's index while we waited to acquire it.
+        cached = _bm25_cache.get(specialty)
+        if cached is not None:
+            return cached
 
-        # Build into locals so a partially-built pair is never visible to the
-        # fast path; publish both globals atomically at the end.
-        parents = get_all_parents()
+        all_parents = get_all_parents()
+        parents = (
+            all_parents
+            if specialty is None
+            else [p for p in all_parents if p.get("specialty") == specialty]
+        )
+
         if not parents:
-            _logger.warning("No parents loaded — BM25 index will be empty.")
+            _logger.warning(
+                "No parents loaded for BM25 (specialty=%r) — index will be empty.", specialty
+            )
             index = BM25Okapi([[]])
         else:
             tokenized = [p["text"].lower().split() for p in parents]
             index = BM25Okapi(tokenized)
-            _logger.info("BM25 index built over %d parents.", len(parents))
+            _logger.info(
+                "BM25 index built over %d parents (specialty=%r).", len(parents), specialty
+            )
 
-        _bm25_parents = parents
-        _bm25_index = index
-        return _bm25_index, _bm25_parents
+        _bm25_cache[specialty] = (index, parents)
+        return index, parents
 
 
 def _reset_bm25_cache() -> None:
-    """Drop the cached BM25 index so the next hybrid query rebuilds it.
+    """Drop every cached BM25 index so the next hybrid query rebuilds them.
 
     Registered with parents.clear_cache() (below) so a corpus reload — via
     save_parents/append_parents or a test's clear_cache — transparently
-    invalidates the index instead of serving parents that no longer match.
+    invalidates all per-specialty indices instead of serving parents that no
+    longer match.
     """
-    global _bm25_index, _bm25_parents
     with _bm25_lock:
-        _bm25_index = None
-        _bm25_parents = []
+        _bm25_cache.clear()
 
 
 # Wire BM25 invalidation into the parent store's cache lifecycle at import time.
 register_invalidation_hook(_reset_bm25_cache)
 
 
-def _bm25_retrieve(query: str, n_results: int) -> list[dict]:
+def _bm25_retrieve(query: str, n_results: int, specialty: str | None = None) -> list[dict]:
     """Rank parents by BM25 score and return the top-n as result dicts.
 
     BM25 operates at parent level (not child level) because:
@@ -222,7 +235,7 @@ def _bm25_retrieve(query: str, n_results: int) -> list[dict]:
     Results that score zero (no query term overlap) are excluded so they don't
     pollute the RRF fusion with signal-less entries.
     """
-    index, parents = _get_bm25_index()
+    index, parents = _get_bm25_index(specialty)
     if not parents:
         return []
 
@@ -251,6 +264,7 @@ def _bm25_retrieve(query: str, n_results: int) -> list[dict]:
                 "authors": parent.get("authors", []),
                 "publication_types": parent.get("publication_types", []),
                 "mesh_terms": parent.get("mesh_terms", []),
+                "specialty": parent.get("specialty", ""),
                 "chunk_id": parent.get("chunk_id", ""),
                 "parent_id": parent.get("chunk_id", ""),
                 "chunk_index": 0,
@@ -333,6 +347,7 @@ def _build_child_result(child_text: str, meta: dict, score: float) -> dict:
         "pubmed_url": f"https://pubmed.ncbi.nlm.nih.gov/{meta.get('pmid', '')}/",
         # Bibliographic
         "journal": meta.get("journal", ""),
+        "specialty": meta.get("specialty", ""),
         # Chunk identifiers
         "chunk_id": meta.get("chunk_id", ""),
         "parent_id": parent_id,
@@ -395,6 +410,7 @@ def retrieve(
     min_score: float = _DEFAULT_MIN_SCORE,
     rerank_enabled: bool | None = None,
     hybrid_enabled: bool | None = None,
+    specialty: str | None = None,
 ) -> list[dict]:
     """
     Find the most relevant parents to a query.
@@ -417,6 +433,12 @@ def retrieve(
                         hybrid_enabled is True.
         hybrid_enabled: Override the HYBRID_SEARCH_ENABLED env default. When
                         True, fuses dense + BM25 via RRF and skips reranking.
+        specialty:      ADR-039 multi-specialty filter, e.g. "oncology". None
+                        (default) searches across every specialty in the
+                        corpus. Applied to both retrieval lanes: a ChromaDB
+                        metadata filter on the dense path, a separate cached
+                        BM25 index scoped to that specialty's parents on the
+                        BM25 path.
 
     Returns:
         List of result dicts, one per unique parent. Keys:
@@ -434,6 +456,7 @@ def retrieve(
             authors           (list[str]) — ["LastName Initials", ...], or []
             publication_types (list[str]) — ["Journal Article", ...], or []
             mesh_terms        (list[str]) — NLM MeSH descriptors, or []
+            specialty         (str)       — ADR-039 specialty tag, or ""
             chunk_id          (str)       — child's stable ID, e.g. "12345_p0_c2"
             parent_id         (str)       — parent's stable ID, e.g. "12345_p0"
             chunk_index       (int)       — child position within its parent
@@ -467,12 +490,18 @@ def retrieve(
     else:
         pool = max(n_results * _OVERFETCH_MULTIPLIER, n_results)
 
-    _logger.info("Querying ChromaDB for top %d child hits (request=%d)...", pool, n_results)
+    _logger.info(
+        "Querying ChromaDB for top %d child hits (request=%d, specialty=%r)...",
+        pool,
+        n_results,
+        specialty,
+    )
 
     raw = collection.query(
         query_embeddings=[query_vector],
         n_results=pool,
         include=["documents", "metadatas", "distances"],
+        where={"specialty": specialty} if specialty is not None else None,
     )
 
     # ChromaDB wraps results in an extra list (one per query). We send one
@@ -497,7 +526,9 @@ def retrieve(
     # then optionally rerank the merged results.
     if hybrid_enabled:
         dense_parents = _dedup_and_resolve(candidates, n_results * _HYBRID_POOL_MULTIPLIER)
-        bm25_parents = _bm25_retrieve(query, n_results * _HYBRID_POOL_MULTIPLIER)
+        bm25_parents = _bm25_retrieve(
+            query, n_results * _HYBRID_POOL_MULTIPLIER, specialty=specialty
+        )
         bm25_top_score = bm25_parents[0]["score"] if bm25_parents else 0.0
 
         if _should_use_bm25(query, bm25_top_score):
@@ -574,6 +605,12 @@ if __name__ == "__main__":
         help="Disable the cross-encoder reranker (dense-only retrieval).",
     )
 
+    parser.add_argument(
+        "--specialty",
+        default=None,
+        help="ADR-039 specialty filter, e.g. 'oncology'. Omit to search all specialties.",
+    )
+
     args = parser.parse_args()
 
     results = retrieve(
@@ -581,6 +618,7 @@ if __name__ == "__main__":
         n_results=args.n,
         min_score=args.min_score,
         rerank_enabled=not args.no_rerank,
+        specialty=args.specialty,
     )
 
     print(f"\n-- Top {len(results)} results for: '{args.query}' --\n")

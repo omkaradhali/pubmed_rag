@@ -46,6 +46,20 @@ _logger = logging.getLogger(__name__)
 
 # Constants
 
+# ADR-039: multi-specialty corpus support. Maps a short specialty name to its
+# Entrez search string. Both entries use a MeSH disease/subject-matter heading
+# (not a "field of study" heading like "Oncology[MeSH]" or "Neurosciences[MeSH]")
+# deliberately: disease-category headings roll up thousands of subheadings
+# hierarchically and index actual research output, while field-of-study
+# headings are narrow administrative tags that return a tiny fraction of the
+# relevant literature. Verified against a live NCBI query 2026-09-11: dropping
+# to "Neurosciences[MeSH]" would have returned ~3K results over 5 years versus
+# ~493K for "Nervous System Diseases[MeSH]" over the same window.
+SPECIALTY_QUERIES: dict[str, str] = {
+    "oncology": "Neoplasms[MeSH]",
+    "neuroscience": "Nervous System Diseases[MeSH]",
+}
+
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 
@@ -374,6 +388,7 @@ def ingest(
     query: str,
     max_results: int = 10,
     reldate: int | None = None,
+    specialty: str | None = None,
 ) -> list[dict]:
     """
     Search PubMed and return parsed abstract records.
@@ -384,17 +399,30 @@ def ingest(
         query:       Entrez search string.
         max_results: Number of abstracts to fetch.
         reldate:     If set, restrict to articles indexed in the last N days.
+        specialty:   If set, tag every returned record with this value (see
+                     ADR-039). Stamped here rather than left for the caller to
+                     add, so a record's specialty is always set at the moment
+                     it's known to have come from that specialty's query —
+                     chunk.py, vectorstore.py, and retrieve.py all propagate
+                     whatever is on the record without re-deriving it.
 
     Returns:
         List of dicts: {pmid, title, abstract, year, doi, doi_url, pmc_id, pmc_url,
-                        authors, journal, publication_types, mesh_terms}.
+                        authors, journal, publication_types, mesh_terms,
+                        specialty (only present when the specialty arg is set)}.
     """
     pmids = search_pubmed(query, max_results=max_results, reldate=reldate)
 
     if not pmids:
         return []
 
-    return fetch_abstracts(pmids)
+    records = fetch_abstracts(pmids)
+
+    if specialty is not None:
+        for record in records:
+            record["specialty"] = specialty
+
+    return records
 
 
 # Persistence
