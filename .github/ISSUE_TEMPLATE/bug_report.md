@@ -24,7 +24,6 @@ What happened instead. Include any error messages or tracebacks.
 - Python version: 
 - pubmed-rag version (`python -c "import pubmed_rag; print(pubmed_rag.__version__)"`) : 
 - `LLM_PROVIDER`: 
-- `VECTOR_STORE_BACKEND`: 
 - `EMBEDDING_PROVIDER`: 
 
 **Logs**

@@ -433,7 +433,8 @@ def retrieve(
                         hybrid_enabled is True.
         hybrid_enabled: Override the HYBRID_SEARCH_ENABLED env default. When
                         True, fuses dense + BM25 via RRF and skips reranking.
-        specialty:      ADR-039 multi-specialty filter, e.g. "oncology". None
+        specialty:      Multi-specialty filter, e.g. "oncology" — see
+                        docs/decisions/multi-specialty-corpus.md. None
                         (default) searches across every specialty in the
                         corpus. Applied to both retrieval lanes: a ChromaDB
                         metadata filter on the dense path, a separate cached
@@ -456,7 +457,7 @@ def retrieve(
             authors           (list[str]) — ["LastName Initials", ...], or []
             publication_types (list[str]) — ["Journal Article", ...], or []
             mesh_terms        (list[str]) — NLM MeSH descriptors, or []
-            specialty         (str)       — ADR-039 specialty tag, or ""
+            specialty         (str)       — multi-specialty tag, or ""
             chunk_id          (str)       — child's stable ID, e.g. "12345_p0_c2"
             parent_id         (str)       — parent's stable ID, e.g. "12345_p0"
             chunk_index       (int)       — child position within its parent
@@ -608,7 +609,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--specialty",
         default=None,
-        help="ADR-039 specialty filter, e.g. 'oncology'. Omit to search all specialties.",
+        help="Specialty filter, e.g. 'oncology'. Omit to search all specialties.",
     )
 
     args = parser.parse_args()

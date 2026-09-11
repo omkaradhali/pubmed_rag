@@ -27,7 +27,7 @@ The default PubMed query does not filter by language. Non-English abstracts are 
 ## Retrieval
 
 ### ChromaDB in-process scaling limit
-ChromaDB runs in the same process as the FastAPI server. Beyond ~100,000 chunks it can slow down substantially and memory usage grows linearly. The production path (ADR-033) is Qdrant, which runs as a separate service and handles millions of vectors efficiently.
+ChromaDB runs in the same process as the FastAPI server. Beyond ~100,000 chunks it can slow down substantially and memory usage grows linearly. Scaling past that means migrating to a purpose-built vector database that runs as a separate service — not yet implemented.
 
 ### BM25 index is in-memory and rebuilt per process
 The hybrid BM25 index (`rank_bm25`) is built from `parents.jsonl` at import time. It is not persisted and is rebuilt on every cold start. For a 5,000-abstract corpus this takes under one second; for larger corpora the startup cost grows linearly.

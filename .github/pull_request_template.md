@@ -12,6 +12,6 @@
 - [ ] Tests pass (`make test`)
 - [ ] Lint and format checks pass (`make lint`)
 - [ ] New public functions have docstrings
-- [ ] If a new ADR is needed, it has been added to `docs/decisions/`
+- [ ] If a significant architecture decision was made, it has been documented in `docs/decisions/`
 - [ ] `.env.example` updated if new environment variables were added
 - [ ] `CHANGELOG.md` updated under `[Unreleased]`

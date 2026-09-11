@@ -21,13 +21,11 @@ class Settings(BaseSettings):
     # NCBI
     ncbi_api_key: str = ""
 
-    # Vector store — chroma (default, embedded, zero config) or qdrant (production)
-    vector_store_backend: str = "chroma"
+    # Vector store — ChromaDB, embedded, zero config
     chroma_persist_dir: str = "./data/chroma_db"
-    qdrant_url: str = ""
-    qdrant_api_key: str = ""
 
-    # Embedding provider — miniml (default, local), medcpt (biomedical, local), openai (production)
+    # Embedding provider — miniml (default, local), bge (stronger, local),
+    # medcpt (biomedical, local)
     embedding_provider: str = "miniml"
 
     # Reranker — cross-encoder second retrieval stage
@@ -39,10 +37,10 @@ class Settings(BaseSettings):
     hybrid_search_enabled: bool = False
 
     # PHI/PII scrubbing — de-identify queries before any
-    # cloud egress. "auto" scrubs only when a cloud provider is configured (LLM
-    # anthropic/haiku/sonnet/openai or EMBEDDING_PROVIDER=openai); "on" always
-    # scrubs; "off" never scrubs (not for clinical use). Runtime gate reads the
-    # env var directly (pipeline.py style); this field keeps .env discoverable.
+    # cloud egress. "auto" scrubs only when a cloud provider is configured
+    # (LLM_PROVIDER=anthropic/haiku/sonnet/openai); "on" always scrubs; "off"
+    # never scrubs (not for clinical use). Runtime gate reads the env var
+    # directly (pipeline.py style); this field keeps .env discoverable.
     phi_scrubbing: str = "auto"
     phi_spacy_model: str = "en_core_web_lg"
 
@@ -56,18 +54,12 @@ class Settings(BaseSettings):
     # CORS — restrict browser origins in production; comma-separated or JSON array
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
-    # Corpus — specialty and time window
-    pubmed_specialty: str = "oncology"
-    pubmed_years_back: int = 10
-
-    # Ingestion
-    ingest_batch_size: int = 500
-
-    # Observability — leave empty to disable
-    logfire_token: str = ""
-    langfuse_public_key: str = ""
-    langfuse_secret_key: str = ""
-    langfuse_host: str = "https://cloud.langfuse.com"
+    # Ingestion — the PubMed search string, and how many abstracts per run.
+    # Multi-specialty deployments (docs/decisions/multi-specialty-corpus.md)
+    # pick a specialty via the --specialty CLI flag on pipeline.py instead;
+    # these are the fallback when no flag is passed.
+    ingest_query: str = "oncology[Title/Abstract]"
+    ingest_max_results: int = 500
 
     # API server
     log_level: str = "INFO"
@@ -100,18 +92,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def check_required_keys(self) -> "Settings":
         """Raise ValueError if a required API key is missing for the configured provider."""
-        needs_openai = self.llm_provider == "openai" or self.embedding_provider == "openai"
-        if needs_openai and not self.openai_api_key:
-            raise ValueError(
-                "OPENAI_API_KEY must be set when LLM_PROVIDER=openai or EMBEDDING_PROVIDER=openai"
-            )
+        if self.llm_provider == "openai" and not self.openai_api_key:
+            raise ValueError("OPENAI_API_KEY must be set when LLM_PROVIDER=openai")
         needs_anthropic = self.llm_provider in ("anthropic", "haiku", "sonnet")
         if needs_anthropic and not self.anthropic_api_key:
             raise ValueError(
                 "ANTHROPIC_API_KEY must be set when LLM_PROVIDER=anthropic/haiku/sonnet"
             )
-        if self.vector_store_backend == "qdrant" and not self.qdrant_url:
-            raise ValueError("QDRANT_URL must be set when VECTOR_STORE_BACKEND=qdrant")
         return self
 
 
