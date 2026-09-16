@@ -1,18 +1,22 @@
 """
-Unit tests for ingest.py — Entrez history-server pagination in search_pubmed().
+Unit tests for ingest.py — Entrez history-server pagination in search_pubmed(),
+plus the date-range-partition fallback for queries that exceed PubMed's
+9,999-per-query ESearch retrieval cap.
 
-requests.get is mocked throughout — these tests exercise the pagination logic
-(when to stop, how retstart/WebEnv/query_key get threaded through pages), not
-live NCBI behavior. time.sleep is patched so tests don't actually wait out the
-rate-limit delay between pages.
+requests.get is mocked throughout — these tests exercise the pagination and
+partitioning logic (when to stop, how retstart/WebEnv/query_key get threaded
+through pages, when/how the date-bisection fallback triggers), not live NCBI
+behavior. time.sleep is patched so tests don't actually wait out the
+rate-limit delay between calls.
 """
 
+import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pubmed_rag import ingest as ingest_module
-from pubmed_rag.ingest import search_pubmed
+from pubmed_rag.ingest import _bisect_date_range, search_pubmed
 
 
 def _esearch_response(
@@ -158,3 +162,234 @@ class TestSearchPubmedPagination:
 
         assert pmids == ["1", "2"]
         assert mock_get.call_count == 2
+
+
+def _date_range_responder(range_data: dict[tuple[str, str], tuple[int, list[str]]]):
+    """
+    Build a requests.get side_effect for date-partitioned calls.
+
+    range_data maps (mindate_str, maxdate_str) -> (count, idlist) for that
+    exact sub-range. A probe call (retmax=0) always gets idlist=[] regardless
+    of what's configured, matching real esearch behavior; any other call
+    (a leaf fetch) gets the configured idlist.
+    """
+
+    def _responder(*args, **kwargs):
+        params = kwargs["params"]
+        key = (params["mindate"], params["maxdate"])
+        count, idlist = range_data[key]
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "esearchresult": {
+                "count": str(count),
+                "idlist": [] if params.get("retmax") == 0 else idlist,
+            }
+        }
+        return response
+
+    return _responder
+
+
+class TestResolveDateBounds:
+    def test_with_reldate_returns_window_ending_today(self):
+        today = datetime.date.today()
+        mindate, maxdate = ingest_module._resolve_date_bounds(30)
+        assert maxdate == today
+        assert mindate == today - datetime.timedelta(days=30)
+
+    def test_without_reldate_returns_wide_fallback_ending_today(self):
+        today = datetime.date.today()
+        mindate, maxdate = ingest_module._resolve_date_bounds(None)
+        assert maxdate == today
+        assert mindate == datetime.date(1900, 1, 1)
+
+
+class TestBisectDateRange:
+    def test_single_leaf_under_cap_fetches_directly_no_bisection(self, monkeypatch):
+        monkeypatch.setattr(ingest_module, "PUBMED_HARD_RESULT_CAP", 5)
+        mindate = datetime.date(2020, 1, 1)
+        maxdate = datetime.date(2020, 1, 10)
+
+        range_data = {
+            ("2020/01/01", "2020/01/10"): (3, ["A", "B", "C"]),
+        }
+        with (
+            patch("pubmed_rag.ingest.requests.get", side_effect=_date_range_responder(range_data)),
+            patch("pubmed_rag.ingest.time.sleep"),
+        ):
+            pmids = _bisect_date_range({}, mindate, maxdate)
+
+        assert pmids == ["A", "B", "C"]
+
+    def test_bisects_when_over_cap_and_merges_left_then_right(self, monkeypatch):
+        monkeypatch.setattr(ingest_module, "PUBMED_HARD_RESULT_CAP", 2)
+        mindate = datetime.date(2020, 1, 1)
+        maxdate = datetime.date(2020, 1, 4)
+        # midpoint = Jan 1 + (4-1)//2 days = Jan 2 -> left [1,2], right [3,4].
+        # Both halves fit under the cap so this isolates a single bisection
+        # step; multi-level recursion is covered separately below.
+        range_data = {
+            ("2020/01/01", "2020/01/04"): (5, []),  # over cap, triggers bisection
+            ("2020/01/01", "2020/01/02"): (2, ["A", "B"]),
+            ("2020/01/03", "2020/01/04"): (2, ["C", "D"]),
+        }
+
+        with (
+            patch("pubmed_rag.ingest.requests.get", side_effect=_date_range_responder(range_data)),
+            patch("pubmed_rag.ingest.time.sleep"),
+        ):
+            pmids = _bisect_date_range({}, mindate, maxdate)
+
+        assert pmids == ["A", "B", "C", "D"]
+
+    def test_recurses_multiple_levels(self, monkeypatch):
+        monkeypatch.setattr(ingest_module, "PUBMED_HARD_RESULT_CAP", 2)
+        mindate = datetime.date(2020, 1, 1)
+        maxdate = datetime.date(2020, 1, 4)
+        # Level 0: [1,4] count=5 -> over cap -> bisect at Jan 2 -> [1,2], [3,4]
+        # Level 1 left [1,2]: count=2 -> at cap, fetch directly
+        # Level 1 right [3,4]: count=3 -> over cap -> bisect at Jan 3 -> [3,3], [4,4]
+        # Level 2 [3,3]: count=1 -> fetch directly
+        # Level 2 [4,4]: count=2 -> fetch directly
+        range_data = {
+            ("2020/01/01", "2020/01/04"): (5, []),
+            ("2020/01/01", "2020/01/02"): (2, ["A", "B"]),
+            ("2020/01/03", "2020/01/04"): (3, []),
+            ("2020/01/03", "2020/01/03"): (1, ["C"]),
+            ("2020/01/04", "2020/01/04"): (2, ["D", "E"]),
+        }
+
+        with (
+            patch("pubmed_rag.ingest.requests.get", side_effect=_date_range_responder(range_data)),
+            patch("pubmed_rag.ingest.time.sleep"),
+        ):
+            pmids = _bisect_date_range({}, mindate, maxdate)
+
+        assert pmids == ["A", "B", "C", "D", "E"]
+
+    def test_zero_count_leaf_returns_empty_without_fetch_call(self, monkeypatch):
+        monkeypatch.setattr(ingest_module, "PUBMED_HARD_RESULT_CAP", 5)
+        mindate = datetime.date(2020, 1, 1)
+        maxdate = datetime.date(2020, 1, 10)
+        range_data = {("2020/01/01", "2020/01/10"): (0, [])}
+
+        with (
+            patch(
+                "pubmed_rag.ingest.requests.get", side_effect=_date_range_responder(range_data)
+            ) as mock_get,
+            patch("pubmed_rag.ingest.time.sleep"),
+        ):
+            pmids = _bisect_date_range({}, mindate, maxdate)
+
+        assert pmids == []
+        mock_get.assert_called_once()  # just the probe, no wasted fetch call
+
+    def test_single_day_over_cap_truncates_instead_of_infinite_recursion(self, monkeypatch):
+        # A day that alone exceeds the cap can't be bisected any finer --
+        # must truncate rather than recurse forever (mindate == maxdate).
+        monkeypatch.setattr(ingest_module, "PUBMED_HARD_RESULT_CAP", 2)
+        single_day = datetime.date(2020, 1, 1)
+        range_data = {
+            ("2020/01/01", "2020/01/01"): (5, ["A", "B"]),  # truncated fetch result
+        }
+
+        with (
+            patch(
+                "pubmed_rag.ingest.requests.get", side_effect=_date_range_responder(range_data)
+            ) as mock_get,
+            patch("pubmed_rag.ingest.time.sleep"),
+        ):
+            pmids = _bisect_date_range({}, single_day, single_day)
+
+        assert pmids == ["A", "B"]
+        # One probe + one truncated fetch -- no recursive calls attempted.
+        assert mock_get.call_count == 2
+
+
+class TestSearchPubmedDatePartitionIntegration:
+    """search_pubmed()'s own decision about whether to trigger the
+    date-partition fallback at all, exercised end-to-end."""
+
+    def test_large_target_triggers_date_partition_not_retstart_paging(self, monkeypatch):
+        monkeypatch.setattr(ingest_module, "PUBMED_HARD_RESULT_CAP", 3)
+        today = datetime.date.today()
+
+        # First call: count exceeds the (monkeypatched) cap via max_results.
+        first_page = _esearch_response(idlist=["x"] * 3, count=100, webenv="WE1", querykey="1")
+
+        range_data = {
+            (today.strftime("%Y/%m/%d"), today.strftime("%Y/%m/%d")): (2, ["P1", "P2"]),
+        }
+        responder = _date_range_responder(range_data)
+
+        calls = {"n": 0}
+
+        def _combined_side_effect(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return first_page
+            return responder(*args, **kwargs)
+
+        with (
+            patch("pubmed_rag.ingest.requests.get", side_effect=_combined_side_effect),
+            patch("pubmed_rag.ingest.time.sleep"),
+        ):
+            # reldate=0 -> mindate == maxdate == today, single-leaf fetch.
+            pmids = search_pubmed("huge query", max_results=100, reldate=0)
+
+        assert pmids == ["P1", "P2"]
+
+    def test_small_max_results_against_huge_total_count_skips_partition(self, monkeypatch):
+        # total_count is enormous, but max_results is small enough that
+        # ordinary retstart pagination never needs to exceed the cap --
+        # must NOT trigger the (expensive) date-partition fallback.
+        monkeypatch.setattr(ingest_module, "PUBMED_HARD_RESULT_CAP", 9999)
+        monkeypatch.setattr(ingest_module, "ESEARCH_MAX_PAGE_SIZE", 10000)
+
+        page1 = _esearch_response(idlist=["1", "2", "3"], count=700_000, webenv="WE1", querykey="1")
+
+        with patch("pubmed_rag.ingest.requests.get") as mock_get:
+            mock_get.return_value = page1
+            pmids = search_pubmed("huge query", max_results=3)
+
+        assert pmids == ["1", "2", "3"]
+        # Only the one call -- confirms no mindate/maxdate probe was ever sent.
+        mock_get.assert_called_once()
+        assert "mindate" not in mock_get.call_args.kwargs["params"]
+
+    def test_date_partition_result_deduped_and_truncated_to_max_results(self, monkeypatch):
+        monkeypatch.setattr(ingest_module, "PUBMED_HARD_RESULT_CAP", 3)
+        today = datetime.date.today()
+        yesterday = today - datetime.timedelta(days=1)
+
+        first_page = _esearch_response(idlist=["x"] * 3, count=100, webenv="WE1", querykey="1")
+
+        # midpoint of [yesterday, today] (a 2-day span) is yesterday itself,
+        # so bisection splits into [yesterday, yesterday] and [today, today].
+        range_data = {
+            (yesterday.strftime("%Y/%m/%d"), today.strftime("%Y/%m/%d")): (6, []),
+            (yesterday.strftime("%Y/%m/%d"), yesterday.strftime("%Y/%m/%d")): (
+                3,
+                ["A", "B", "DUP"],
+            ),
+            (today.strftime("%Y/%m/%d"), today.strftime("%Y/%m/%d")): (3, ["DUP", "C", "D"]),
+        }
+        responder = _date_range_responder(range_data)
+
+        calls = {"n": 0}
+
+        def _combined_side_effect(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return first_page
+            return responder(*args, **kwargs)
+
+        with (
+            patch("pubmed_rag.ingest.requests.get", side_effect=_combined_side_effect),
+            patch("pubmed_rag.ingest.time.sleep"),
+        ):
+            pmids = search_pubmed("huge query", max_results=4, reldate=1)
+
+        # Merged: A, B, DUP, DUP, C, D -> deduped: A, B, DUP, C, D -> truncated to 4.
+        assert pmids == ["A", "B", "DUP", "C"]
