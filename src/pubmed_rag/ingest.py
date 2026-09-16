@@ -1,7 +1,9 @@
 """
 ingest.py — Fetch PubMed abstracts via NCBI E-utilities.
 
-NCBI's esearch will return up to 10,000 PMIDs in a single call.
+NCBI's esearch caps each individual call at 10,000 PMIDs. search_pubmed()
+pages past that internally via the Entrez history server (usehistory=y +
+WebEnv/query_key), so max_results can exceed 10,000.
 
 Public API:
     search_pubmed(query, max_results) -> list[str]             # returns PMIDs
@@ -67,6 +69,10 @@ EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 # Batch size for efetch calls — NCBI can handle up to 200 PMIDs per request
 EFETCH_BATCH_SIZE = 200
 
+# Max PMIDs esearch will return per call, regardless of usehistory — pagination
+# via retstart is what lets search_pubmed() walk past this per-call ceiling.
+ESEARCH_MAX_PAGE_SIZE = 10000
+
 # Polite delay between batches — with API key: 10 req/sec, without: 3 req/sec
 REQUEST_DELAY_WITH_API_KEY = 0.11  # seconds
 REQUEST_DELAY_WITHOUT_API_KEY = 0.34  # seconds
@@ -100,6 +106,34 @@ def _api_params() -> dict[str, str]:
     return params
 
 
+def _esearch_request(params: dict) -> dict:
+    """
+    Perform one esearch GET request and return its "esearchresult" dict.
+
+    Shared by every page of search_pubmed() so the request + error-handling
+    logic exists in exactly one place, regardless of how many pages a search
+    needs.
+
+    Raises:
+        requests.HTTPError: on a non-2xx response.
+        ValueError: if the response JSON is missing expected fields.
+    """
+    try:
+        response = requests.get(ESEARCH_URL, params=params, timeout=SEARCH_MPIDS_API_TIMEOUT)
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        return data.get("esearchresult", {})
+
+    except HTTPError as err:
+        raise HTTPError(f"API did not return a 2xx response: {err}") from err
+
+    except ValueError as err:
+        raise ValueError(f"Unexpected esearch response structure: {err}") from err
+
+
 # Step 1: search
 def search_pubmed(
     query: str,
@@ -109,9 +143,18 @@ def search_pubmed(
     """
     Search PubMed and return a list of PMIDs matching query.
 
+    esearch caps every individual response at ESEARCH_MAX_PAGE_SIZE (10,000)
+    PMIDs. To return more than that, this opens an Entrez history-server
+    session on the first call (usehistory=y) and pages through the rest with
+    retstart, reusing the session's WebEnv/query_key instead of re-sending
+    the query term — NCBI slices the same cached result set on each page
+    rather than re-running the search.
+
     Args:
         query:       Entrez search string, e.g. "colorectal cancer[Title/Abstract]"
-        max_results: How many PMIDs to return (NCBI cap: 10,000).
+        max_results: How many PMIDs to return, no longer capped at 10,000 —
+                     paginates internally to satisfy any value up to the
+                     query's total result count.
         reldate:     If set, restrict results to articles indexed in the last N days.
 
     Returns:
@@ -121,44 +164,74 @@ def search_pubmed(
         requests.HTTPError: on a non-2xx response.
         ValueError: if the response JSON is missing expected fields.
 
-    Request format example:
+    Request format example (first page, opens the history session):
         GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi
-            ?db=pubmed&term=<query>&retmax=<n>&retmode=json&api_key=<key>
+            ?db=pubmed&term=<query>&retmax=<n>&retstart=0&usehistory=y
+            &retmode=json&api_key=<key>
+
+    Later pages reuse the session instead of the query term:
+        GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi
+            ?db=pubmed&WebEnv=<webenv>&query_key=<querykey>&retmax=<n>
+            &retstart=<offset>&retmode=json&api_key=<key>
 
     Sample Response:
         {
           "esearchresult": {
+            "count": "698401",
+            "webenv": "NCID_1_...",
+            "querykey": "1",
             "idlist": ["12345678", "87654321", ...]
           }
         }
     """
-    pmids: list[str] = []
-
-    params = _api_params() | {
+    base_params = _api_params() | {
         "db": "pubmed",
         "term": query,
-        "retmax": max_results,
         "retmode": "json",
     }
 
     if reldate is not None:
-        params["reldate"] = reldate
-        params["datetype"] = "edat"
+        base_params["reldate"] = reldate
+        base_params["datetype"] = "edat"
 
-    try:
-        response = requests.get(ESEARCH_URL, params=params, timeout=SEARCH_MPIDS_API_TIMEOUT)
+    first_page_size = min(max_results, ESEARCH_MAX_PAGE_SIZE)
+    first_page_params = base_params | {
+        "retmax": first_page_size,
+        "retstart": 0,
+        "usehistory": "y",
+    }
+    result = _esearch_request(first_page_params)
 
-        response.raise_for_status()
+    pmids: list[str] = list(result.get("idlist", []))
+    total_count = int(result.get("count", 0))
+    web_env = result.get("webenv", "")
+    query_key = result.get("querykey", "")
 
-        data = response.json()
+    # Nothing to page through: either the whole result fit in the first page,
+    # or NCBI didn't hand back a history session (e.g. a zero-result search).
+    target = min(max_results, total_count)
+    retstart = len(pmids)
 
-        pmids = data.get("esearchresult", {}).get("idlist", [])
+    while retstart < target and web_env and query_key:
+        time.sleep(_request_delay())
 
-    except HTTPError as err:
-        raise HTTPError(f"API did not return a 2xx response: {err}") from err
+        page_size = min(ESEARCH_MAX_PAGE_SIZE, target - retstart)
+        page_params = base_params | {
+            "retmax": page_size,
+            "retstart": retstart,
+            "WebEnv": web_env,
+            "query_key": query_key,
+        }
+        page_result = _esearch_request(page_params)
 
-    except ValueError as err:
-        raise ValueError(f"Unexpected esearch response structure: {err}") from err
+        page_pmids = page_result.get("idlist", [])
+        if not page_pmids:
+            # Defensive: stop rather than loop forever if NCBI ever returns an
+            # empty page before we've reached `target`.
+            break
+
+        pmids.extend(page_pmids)
+        retstart += len(page_pmids)
 
     return pmids
 
